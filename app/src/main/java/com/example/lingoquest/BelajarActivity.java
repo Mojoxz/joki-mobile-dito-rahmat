@@ -72,6 +72,11 @@ public class BelajarActivity extends AppCompatActivity {
 
         findViewById(R.id.layout_continue_learning).setOnClickListener(v -> showContinueLearningDialog());
         findViewById(R.id.layout_new_practice).setOnClickListener(v -> showNewPracticeDialog());
+
+        // TAMBAHAN BARU: Listener untuk Listening dan Reading
+        findViewById(R.id.layout_listening_practice).setOnClickListener(v -> showListeningDialog());
+        findViewById(R.id.layout_reading_practice).setOnClickListener(v -> showReadingDialog());
+
         findViewById(R.id.see_more_languages).setOnClickListener(v -> {
             nestedScrollView.smoothScrollTo(0, llLanguageList.getBottom());
             loadMoreLanguages();
@@ -113,6 +118,50 @@ public class BelajarActivity extends AppCompatActivity {
             final String languageName = languages[i];
             findViewById(layoutIds[i]).setOnClickListener(v -> startGameActivity(languageName));
         }
+    }
+
+    // TAMBAHAN BARU: Method untuk Listening Dialog
+    private void showListeningDialog() {
+        String[] languages = {"Bahasa Inggris", "Bahasa Jepang", "Bahasa Korea", "Bahasa Mandarin"};
+
+        new AlertDialog.Builder(this)
+                .setTitle("Pilih Bahasa - Listening")
+                .setMessage("Pilih bahasa yang ingin Anda pelajari dengan latihan listening")
+                .setItems(languages, (dialog, which) -> {
+                    String selectedLanguage = languages[which];
+                    startListeningActivity(selectedLanguage);
+                })
+                .setNegativeButton("Batal", (dialog, which) -> dialog.dismiss())
+                .show();
+    }
+
+    // TAMBAHAN BARU: Method untuk Reading Dialog
+    private void showReadingDialog() {
+        String[] languages = {"Bahasa Inggris", "Bahasa Jepang", "Bahasa Korea", "Bahasa Mandarin"};
+
+        new AlertDialog.Builder(this)
+                .setTitle("Pilih Bahasa - Reading")
+                .setMessage("Pilih bahasa yang ingin Anda pelajari dengan latihan reading")
+                .setItems(languages, (dialog, which) -> {
+                    String selectedLanguage = languages[which];
+                    startReadingActivity(selectedLanguage);
+                })
+                .setNegativeButton("Batal", (dialog, which) -> dialog.dismiss())
+                .show();
+    }
+
+    // TAMBAHAN BARU: Method untuk start Listening Activity
+    private void startListeningActivity(String language) {
+        Intent intent = new Intent(this, ListeningActivity.class);
+        intent.putExtra("language", language);
+        startActivity(intent);
+    }
+
+    // TAMBAHAN BARU: Method untuk start Reading Activity
+    private void startReadingActivity(String language) {
+        Intent intent = new Intent(this, ReadingActivity.class);
+        intent.putExtra("language", language);
+        startActivity(intent);
     }
 
     private void getLanguageLevel(String languageName, LanguageLevelCallback callback) {

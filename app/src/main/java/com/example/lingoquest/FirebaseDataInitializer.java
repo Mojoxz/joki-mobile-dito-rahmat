@@ -65,7 +65,6 @@ public class FirebaseDataInitializer {
                 {10, "Apa arti kata \"jalan\"?", "Road", "Wall", "Hill", "Tree", "Road", 10, "@drawable/soal_jalan"}
         };
 
-        // Get language ID first, then add questions
         getLanguageIdAndAddQuestions("Bahasa Inggris", questions);
     }
 
@@ -155,6 +154,200 @@ public class FirebaseDataInitializer {
                         Log.e(TAG, "Error getting language: " + languageName, e));
     }
 
+    // ==================== LISTENING QUESTIONS ====================
+
+    public void initializeListeningQuestions() {
+        addEnglishListeningQuestions();
+        addJapaneseListeningQuestions();
+        addKoreanListeningQuestions();
+        addMandarinListeningQuestions();
+    }
+
+    private void addEnglishListeningQuestions() {
+        Object[][] questions = {
+                {1, "What did you hear?", "audio_url_here", "Hello", "Goodbye", "Thank you", "Sorry", "Hello", 10},
+                {1, "What greeting did you hear?", "audio_url_here", "Good morning", "Good night", "Good afternoon", "Good evening", "Good morning", 10},
+                {1, "What number did you hear?", "audio_url_here", "One", "Two", "Three", "Four", "Two", 10},
+                {1, "What color was mentioned?", "audio_url_here", "Red", "Blue", "Green", "Yellow", "Blue", 10},
+                {1, "What animal did you hear?", "audio_url_here", "Dog", "Cat", "Bird", "Fish", "Cat", 10}
+        };
+
+        getLanguageIdAndAddListeningQuestions("Bahasa Inggris", questions);
+    }
+
+    private void addJapaneseListeningQuestions() {
+        Object[][] questions = {
+                {1, "日本語で何と言いましたか？", "audio_url_here", "こんにちは (Konnichiwa)", "さようなら (Sayounara)", "ありがとう (Arigatou)", "すみません (Sumimasen)", "こんにちは (Konnichiwa)", 10},
+                {1, "何の数字を聞きましたか？", "audio_url_here", "一 (Ichi)", "二 (Ni)", "三 (San)", "四 (Shi)", "二 (Ni)", 10},
+                {1, "何色と言いましたか？", "audio_url_here", "赤 (Aka)", "青 (Ao)", "緑 (Midori)", "黄色 (Kiiro)", "青 (Ao)", 10}
+        };
+
+        getLanguageIdAndAddListeningQuestions("Bahasa Jepang", questions);
+    }
+
+    private void addKoreanListeningQuestions() {
+        Object[][] questions = {
+                {1, "무엇을 들었습니까?", "audio_url_here", "안녕하세요 (Annyeonghaseyo)", "안녕히 가세요 (Annyeonghi gaseyo)", "감사합니다 (Gamsahamnida)", "미안합니다 (Mianhamnida)", "안녕하세요 (Annyeonghaseyo)", 10},
+                {1, "어떤 숫자를 들었습니까?", "audio_url_here", "하나 (Hana)", "둘 (Dul)", "셋 (Set)", "넷 (Net)", "둘 (Dul)", 10}
+        };
+
+        getLanguageIdAndAddListeningQuestions("Bahasa Korea", questions);
+    }
+
+    private void addMandarinListeningQuestions() {
+        Object[][] questions = {
+                {1, "你听到了什么？", "audio_url_here", "你好 (Nǐ hǎo)", "再见 (Zàijiàn)", "谢谢 (Xièxie)", "对不起 (Duìbùqǐ)", "你好 (Nǐ hǎo)", 10},
+                {1, "你听到了什么数字？", "audio_url_here", "一 (Yī)", "二 (Èr)", "三 (Sān)", "四 (Sì)", "二 (Èr)", 10}
+        };
+
+        getLanguageIdAndAddListeningQuestions("Bahasa Mandarin", questions);
+    }
+
+    private void getLanguageIdAndAddListeningQuestions(String languageName, Object[][] questions) {
+        db.collection("languages")
+                .whereEqualTo("language_name", languageName)
+                .limit(1)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    if (!queryDocumentSnapshots.isEmpty()) {
+                        String languageId = queryDocumentSnapshots.getDocuments().get(0).getId();
+
+                        for (Object[] q : questions) {
+                            Map<String, Object> question = new HashMap<>();
+                            question.put("language_id", languageId);
+                            question.put("question_level", q[0]);
+                            question.put("question_text", q[1]);
+                            question.put("audio_url", q[2]);
+                            question.put("option_1", q[3]);
+                            question.put("option_2", q[4]);
+                            question.put("option_3", q[5]);
+                            question.put("option_4", q[6]);
+                            question.put("correct_answer", q[7]);
+                            question.put("xp_reward", q[8]);
+
+                            db.collection("listening_questions")
+                                    .add(question)
+                                    .addOnSuccessListener(docRef ->
+                                            Log.d(TAG, "Listening question added for " + languageName))
+                                    .addOnFailureListener(e ->
+                                            Log.e(TAG, "Error adding listening question", e));
+                        }
+                    }
+                })
+                .addOnFailureListener(e ->
+                        Log.e(TAG, "Error getting language: " + languageName, e));
+    }
+
+    // ==================== READING QUESTIONS ====================
+
+    public void initializeReadingQuestions() {
+        addEnglishReadingQuestions();
+        addJapaneseReadingQuestions();
+        addKoreanReadingQuestions();
+        addMandarinReadingQuestions();
+    }
+
+    private void addEnglishReadingQuestions() {
+        Object[][] questions = {
+                {1, "My name is John. I am a student. I study English every day.",
+                        "What is John?",
+                        "A teacher", "A student", "A doctor", "A worker", "A student", 15},
+
+                {1, "The cat is sleeping on the sofa. It is very comfortable.",
+                        "Where is the cat?",
+                        "On the bed", "On the sofa", "On the floor", "On the table", "On the sofa", 15},
+
+                {1, "I wake up at 7 AM every morning. Then I have breakfast and go to school.",
+                        "What time does the person wake up?",
+                        "6 AM", "7 AM", "8 AM", "9 AM", "7 AM", 15},
+
+                {1, "My favorite color is blue. I like blue because it reminds me of the ocean.",
+                        "What is the person's favorite color?",
+                        "Red", "Green", "Blue", "Yellow", "Blue", 15}
+        };
+
+        getLanguageIdAndAddReadingQuestions("Bahasa Inggris", questions);
+    }
+
+    private void addJapaneseReadingQuestions() {
+        Object[][] questions = {
+                {1, "私の名前は田中です。私は学生です。毎日日本語を勉強しています。",
+                        "田中さんは何ですか？",
+                        "先生", "学生", "医者", "会社員", "学生", 15},
+
+                {1, "猫がソファで寝ています。とても気持ちよさそうです。",
+                        "猫はどこにいますか？",
+                        "ベッドの上", "ソファの上", "床の上", "テーブルの上", "ソファの上", 15}
+        };
+
+        getLanguageIdAndAddReadingQuestions("Bahasa Jepang", questions);
+    }
+
+    private void addKoreanReadingQuestions() {
+        Object[][] questions = {
+                {1, "저는 김민수입니다. 저는 학생입니다. 매일 한국어를 공부합니다.",
+                        "김민수는 무엇입니까?",
+                        "선생님", "학생", "의사", "회사원", "학생", 15},
+
+                {1, "고양이가 소파에서 자고 있습니다. 매우 편안해 보입니다.",
+                        "고양이는 어디에 있습니까?",
+                        "침대 위", "소파 위", "바닥 위", "테이블 위", "소파 위", 15}
+        };
+
+        getLanguageIdAndAddReadingQuestions("Bahasa Korea", questions);
+    }
+
+    private void addMandarinReadingQuestions() {
+        Object[][] questions = {
+                {1, "我叫李明。我是学生。我每天学习中文。",
+                        "李明是什么？",
+                        "老师", "学生", "医生", "工人", "学生", 15},
+
+                {1, "猫在沙发上睡觉。它看起来很舒服。",
+                        "猫在哪里？",
+                        "床上", "沙发上", "地板上", "桌子上", "沙发上", 15}
+        };
+
+        getLanguageIdAndAddReadingQuestions("Bahasa Mandarin", questions);
+    }
+
+    private void getLanguageIdAndAddReadingQuestions(String languageName, Object[][] questions) {
+        db.collection("languages")
+                .whereEqualTo("language_name", languageName)
+                .limit(1)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    if (!queryDocumentSnapshots.isEmpty()) {
+                        String languageId = queryDocumentSnapshots.getDocuments().get(0).getId();
+
+                        for (Object[] q : questions) {
+                            Map<String, Object> question = new HashMap<>();
+                            question.put("language_id", languageId);
+                            question.put("question_level", q[0]);
+                            question.put("reading_text", q[1]);
+                            question.put("question_text", q[2]);
+                            question.put("option_1", q[3]);
+                            question.put("option_2", q[4]);
+                            question.put("option_3", q[5]);
+                            question.put("option_4", q[6]);
+                            question.put("correct_answer", q[7]);
+                            question.put("xp_reward", q[8]);
+
+                            db.collection("reading_questions")
+                                    .add(question)
+                                    .addOnSuccessListener(docRef ->
+                                            Log.d(TAG, "Reading question added for " + languageName))
+                                    .addOnFailureListener(e ->
+                                            Log.e(TAG, "Error adding reading question", e));
+                        }
+                    }
+                })
+                .addOnFailureListener(e ->
+                        Log.e(TAG, "Error getting language: " + languageName, e));
+    }
+
+    // ==================== ADMIN ACCOUNT ====================
+
     public void initializeAdminAccount() {
         // Check if admin exists first
         db.collection("users")
@@ -189,13 +382,16 @@ public class FirebaseDataInitializer {
                 });
     }
 
-    // Call this method once from your MainActivity or a setup screen
+    // ==================== INITIALIZE ALL DATA ====================
+
     public void initializeAllData() {
         initializeLanguages();
 
         // Wait a bit for languages to be created, then add questions
         new android.os.Handler().postDelayed(() -> {
             initializeQuestions();
+            initializeListeningQuestions();
+            initializeReadingQuestions();
         }, 2000);
 
         initializeAdminAccount();

@@ -8,6 +8,7 @@ import android.os.Looper;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.widget.NestedScrollView;
 import com.bumptech.glide.Glide;
@@ -50,6 +51,21 @@ public class MainActivity extends AppCompatActivity {
 
         SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
         userId = prefs.getString("user_id", null);
+
+        // ==================== TAMBAHAN: INISIALISASI DATA ====================
+        // Cek apakah data sudah diinisialisasi sebelumnya
+        boolean dataInitialized = prefs.getBoolean("data_initialized", false);
+
+        if (!dataInitialized) {
+            // Inisialisasi data hanya sekali
+            initializeFirebaseData();
+
+            // Tandai bahwa data sudah diinisialisasi
+            prefs.edit().putBoolean("data_initialized", true).apply();
+
+            Toast.makeText(this, "Initializing app data... Please wait", Toast.LENGTH_LONG).show();
+        }
+        // ====================================================================
 
         ivAvatar = findViewById(R.id.avatar);
         tvLevel = findViewById(R.id.level_value);
@@ -98,6 +114,23 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+
+    // ==================== TAMBAHAN: METHOD INISIALISASI DATA ====================
+    /**
+     * Method untuk inisialisasi data Firebase
+     * Hanya akan dijalankan sekali saat pertama kali app dibuka
+     */
+    private void initializeFirebaseData() {
+        FirebaseDataInitializer initializer = new FirebaseDataInitializer();
+        initializer.initializeAllData();
+
+        // Log untuk debugging
+        android.util.Log.d("MainActivity", "Firebase data initialization started");
+
+        // Optional: Tampilkan dialog loading
+        // Anda bisa tambahkan ProgressDialog atau Toast di sini
+    }
+    // ===========================================================================
 
     private void loadUserData() {
         if (userId == null) return;

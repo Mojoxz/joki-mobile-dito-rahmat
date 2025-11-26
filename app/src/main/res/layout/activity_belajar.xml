@@ -301,6 +301,7 @@
                     </LinearLayout>
                 </LinearLayout>
 
+                <!-- Row 1: Lanjutkan Belajar & Latihan Baru -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -332,6 +333,7 @@
                             android:text="Lanjutkan Belajar"
                             android:textColor="@android:color/white"
                             android:textSize="12sp"
+                            android:gravity="center"
                             android:layout_marginTop="8dp"/>
                     </LinearLayout>
 
@@ -358,6 +360,73 @@
                             android:text="Latihan Baru"
                             android:textColor="@android:color/white"
                             android:textSize="12sp"
+                            android:gravity="center"
+                            android:layout_marginTop="8dp"/>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- Row 2: Listening & Reading -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:layout_marginTop="12dp"
+                    android:paddingHorizontal="16dp">
+
+                    <!-- Listening Practice -->
+                    <LinearLayout
+                        android:id="@+id/layout_listening_practice"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:background="@drawable/bg_statistik_item"
+                        android:padding="16dp"
+                        android:layout_marginEnd="8dp">
+
+                        <ImageView
+                            android:layout_width="30dp"
+                            android:layout_height="30dp"
+                            android:src="@android:drawable/ic_lock_silent_mode_off"
+                            android:tint="#FFFFFF"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Listening"
+                            android:textColor="@android:color/white"
+                            android:textSize="12sp"
+                            android:gravity="center"
+                            android:layout_marginTop="8dp"/>
+                    </LinearLayout>
+
+                    <!-- Reading Practice -->
+                    <LinearLayout
+                        android:id="@+id/layout_reading_practice"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:gravity="center"
+                        android:background="@drawable/bg_statistik_item"
+                        android:padding="16dp"
+                        android:layout_marginStart="8dp">
+
+                        <ImageView
+                            android:layout_width="30dp"
+                            android:layout_height="30dp"
+                            android:src="@android:drawable/ic_menu_my_calendar"
+                            android:tint="#FFFFFF"/>
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Reading"
+                            android:textColor="@android:color/white"
+                            android:textSize="12sp"
+                            android:gravity="center"
                             android:layout_marginTop="8dp"/>
                     </LinearLayout>
                 </LinearLayout>

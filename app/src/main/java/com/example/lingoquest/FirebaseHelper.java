@@ -54,6 +54,10 @@ public class FirebaseHelper {
     private static final String COLLECTION_CHALLENGE_MODES = "challenge_modes";
     private static final String COLLECTION_XP_HISTORY = "xp_history";
     private static final String COLLECTION_LEADERBOARD = "leaderboard";
+    private static final String COLLECTION_LISTENING_QUESTIONS = "listening_questions";
+    private static final String COLLECTION_READING_QUESTIONS = "reading_questions";
+    private static final String COLLECTION_USER_LISTENING_PROGRESS = "user_listening_progress";
+    private static final String COLLECTION_USER_READING_PROGRESS = "user_reading_progress";
 
     private static FirebaseHelper instance;
 
@@ -579,4 +583,175 @@ public class FirebaseHelper {
                 })
                 .addOnFailureListener(e -> Log.e(TAG, "Error resetting weekly XP", e));
     }
+
+    // ==================== Listening Questions ====================
+
+    public void getListeningQuestions(String languageId, int level, QuestionsCallback callback) {
+        db.collection(COLLECTION_LISTENING_QUESTIONS)
+                .whereEqualTo("language_id", languageId)
+                .whereEqualTo("question_level", level)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    List<Map<String, Object>> questions = new ArrayList<>();
+                    for (QueryDocumentSnapshot doc : queryDocumentSnapshots) {
+                        Map<String, Object> question = doc.getData();
+                        question.put("question_id", doc.getId());
+                        questions.add(question);
+                    }
+                    callback.onSuccess(questions);
+                })
+                .addOnFailureListener(e -> callback.onFailure(e.getMessage()));
+    }
+
+    public void addListeningQuestion(Map<String, Object> questionData, AddQuestionCallback callback) {
+        db.collection(COLLECTION_LISTENING_QUESTIONS)
+                .add(questionData)
+                .addOnSuccessListener(docRef -> callback.onSuccess(docRef.getId()))
+                .addOnFailureListener(e -> callback.onFailure(e.getMessage()));
+    }
+
+// ==================== Reading Questions ====================
+
+    public void getReadingQuestions(String languageId, int level, QuestionsCallback callback) {
+        db.collection(COLLECTION_READING_QUESTIONS)
+                .whereEqualTo("language_id", languageId)
+                .whereEqualTo("question_level", level)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    List<Map<String, Object>> questions = new ArrayList<>();
+                    for (QueryDocumentSnapshot doc : queryDocumentSnapshots) {
+                        Map<String, Object> question = doc.getData();
+                        question.put("question_id", doc.getId());
+                        questions.add(question);
+                    }
+                    callback.onSuccess(questions);
+                })
+                .addOnFailureListener(e -> callback.onFailure(e.getMessage()));
+    }
+
+    public void addReadingQuestion(Map<String, Object> questionData, AddQuestionCallback callback) {
+        db.collection(COLLECTION_READING_QUESTIONS)
+                .add(questionData)
+                .addOnSuccessListener(docRef -> callback.onSuccess(docRef.getId()))
+                .addOnFailureListener(e -> callback.onFailure(e.getMessage()));
+    }
+
+// ==================== User Progress ====================
+
+    public void updateUserListeningProgress(String userId, String languageId,
+                                            int currentLevel, int totalXp, XpCallback callback) {
+        db.collection(COLLECTION_USER_LISTENING_PROGRESS)
+                .whereEqualTo("user_id", userId)
+                .whereEqualTo("language_id", languageId)
+                .limit(1)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    if (!queryDocumentSnapshots.isEmpty()) {
+                        String docId = queryDocumentSnapshots.getDocuments().get(0).getId();
+                        Map<String, Object> updates = new HashMap<>();
+                        updates.put("current_level", currentLevel);
+                        updates.put("total_xp", totalXp);
+
+                        db.collection(COLLECTION_USER_LISTENING_PROGRESS).document(docId)
+                                .update(updates)
+                                .addOnSuccessListener(aVoid -> {
+                                    if (callback != null) callback.onSuccess();
+                                })
+                                .addOnFailureListener(e -> {
+                                    if (callback != null) callback.onFailure(e.getMessage());
+                                });
+                    } else {
+                        // Create new progress
+                        Map<String, Object> progress = new HashMap<>();
+                        progress.put("user_id", userId);
+                        progress.put("language_id", languageId);
+                        progress.put("current_level", currentLevel);
+                        progress.put("total_xp", totalXp);
+
+                        db.collection(COLLECTION_USER_LISTENING_PROGRESS)
+                                .add(progress)
+                                .addOnSuccessListener(docRef -> {
+                                    if (callback != null) callback.onSuccess();
+                                })
+                                .addOnFailureListener(e -> {
+                                    if (callback != null) callback.onFailure(e.getMessage());
+                                });
+                    }
+                });
+    }
+
+    public void updateUserReadingProgress(String userId, String languageId,
+                                          int currentLevel, int totalXp, XpCallback callback) {
+        db.collection(COLLECTION_USER_READING_PROGRESS)
+                .whereEqualTo("user_id", userId)
+                .whereEqualTo("language_id", languageId)
+                .limit(1)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    if (!queryDocumentSnapshots.isEmpty()) {
+                        String docId = queryDocumentSnapshots.getDocuments().get(0).getId();
+                        Map<String, Object> updates = new HashMap<>();
+                        updates.put("current_level", currentLevel);
+                        updates.put("total_xp", totalXp);
+
+                        db.collection(COLLECTION_USER_READING_PROGRESS).document(docId)
+                                .update(updates)
+                                .addOnSuccessListener(aVoid -> {
+                                    if (callback != null) callback.onSuccess();
+                                })
+                                .addOnFailureListener(e -> {
+                                    if (callback != null) callback.onFailure(e.getMessage());
+                                });
+                    } else {
+                        // Create new progress
+                        Map<String, Object> progress = new HashMap<>();
+                        progress.put("user_id", userId);
+                        progress.put("language_id", languageId);
+                        progress.put("current_level", currentLevel);
+                        progress.put("total_xp", totalXp);
+
+                        db.collection(COLLECTION_USER_READING_PROGRESS)
+                                .add(progress)
+                                .addOnSuccessListener(docRef -> {
+                                    if (callback != null) callback.onSuccess();
+                                })
+                                .addOnFailureListener(e -> {
+                                    if (callback != null) callback.onFailure(e.getMessage());
+                                });
+                    }
+                });
+    }
+
+    public void getUserListeningProgress(String userId, String languageId, UserDataCallback callback) {
+        db.collection(COLLECTION_USER_LISTENING_PROGRESS)
+                .whereEqualTo("user_id", userId)
+                .whereEqualTo("language_id", languageId)
+                .limit(1)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    if (!queryDocumentSnapshots.isEmpty()) {
+                        callback.onSuccess(queryDocumentSnapshots.getDocuments().get(0).getData());
+                    } else {
+                        callback.onFailure("Progress not found");
+                    }
+                })
+                .addOnFailureListener(e -> callback.onFailure(e.getMessage()));
+    }
+
+    public void getUserReadingProgress(String userId, String languageId, UserDataCallback callback) {
+        db.collection(COLLECTION_USER_READING_PROGRESS)
+                .whereEqualTo("user_id", userId)
+                .whereEqualTo("language_id", languageId)
+                .limit(1)
+                .get()
+                .addOnSuccessListener(queryDocumentSnapshots -> {
+                    if (!queryDocumentSnapshots.isEmpty()) {
+                        callback.onSuccess(queryDocumentSnapshots.getDocuments().get(0).getData());
+                    } else {
+                        callback.onFailure("Progress not found");
+                    }
+                })
+                .addOnFailureListener(e -> callback.onFailure(e.getMessage()));
+    }
 }
+
