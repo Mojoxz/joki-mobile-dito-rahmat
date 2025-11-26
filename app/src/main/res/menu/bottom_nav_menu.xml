@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_home"
+        android:icon="@drawable/home"
+        android:title="Beranda" />
+    <item
+        android:id="@+id/nav_belajar"
+        android:icon="@drawable/belajar"
+        android:title="Belajar" />
+    <item
+        android:id="@+id/nav_tantangan"
+        android:icon="@drawable/tantangan"
+        android:title="Tantangan" />
+    <item
+        android:id="@+id/nav_peringkat"
+        android:icon="@drawable/peringkat"
+        android:title="Peringkat" />
+    <item
+        android:id="@+id/nav_profile"
+        android:icon="@drawable/profil"
+        android:title="Profil" />
+</menu>

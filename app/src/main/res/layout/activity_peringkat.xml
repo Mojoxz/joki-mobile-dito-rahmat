@@ -1,0 +1,353 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    android:background="#FFFFFF">
+
+    <!-- Header Section (Fixed) -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#FFFFFF"
+        android:elevation="4dp"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <!-- Title -->
+        <TextView
+            android:id="@+id/title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Leaderboard"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="#000000"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="16dp"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- TabLayout for Harian, Mingguan, Bulanan -->
+        <com.google.android.material.tabs.TabLayout
+            android:id="@+id/tab_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:tabMode="fixed"
+            app:tabGravity="fill"
+            app:tabSelectedTextColor="#FFFFFF"
+            app:tabTextColor="#000000"
+            app:tabIndicatorColor="#e040fb"
+            app:layout_constraintTop_toBottomOf="@id/title"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            android:layout_marginTop="8dp"
+            android:background="#e6e6fa">
+            <com.google.android.material.tabs.TabItem
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Harian" />
+            <com.google.android.material.tabs.TabItem
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mingguan" />
+            <com.google.android.material.tabs.TabItem
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bulanan" />
+        </com.google.android.material.tabs.TabLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <!-- Scrollable Content Area -->
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        app:layout_constraintTop_toBottomOf="@id/header"
+        app:layout_constraintBottom_toTopOf="@id/bottom_container">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- User Item 1 (Top 1) -->
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:id="@+id/user_item_1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:id="@+id/rank1"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/circle_purple"
+                    android:text="#1"
+                    android:textColor="#FFFFFF"
+                    android:gravity="center"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent" />
+
+                <ImageView
+                    android:id="@+id/profile_image1"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:src="@drawable/default_avatar"
+                    app:layout_constraintStart_toEndOf="@id/rank1"
+                    app:layout_constraintTop_toTopOf="parent"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/name1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textSize="16sp"
+                    android:textColor="#000000"
+                    app:layout_constraintStart_toEndOf="@id/profile_image1"
+                    app:layout_constraintTop_toTopOf="@id/profile_image1"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/level_xp1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textSize="14sp"
+                    android:textColor="#000000"
+                    app:layout_constraintStart_toEndOf="@id/profile_image1"
+                    app:layout_constraintTop_toBottomOf="@id/name1"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/crown1"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="*Winner*"
+                    android:textSize="12sp"
+                    android:textColor="#FFD700"
+                    app:layout_constraintStart_toEndOf="@id/name1"
+                    app:layout_constraintTop_toTopOf="@id/name1"
+                    android:layout_marginStart="8dp" />
+            </androidx.constraintlayout.widget.ConstraintLayout>
+
+            <!-- User Item 2 -->
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:id="@+id/user_item_2"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:id="@+id/rank2"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/circle_purple"
+                    android:text="#2"
+                    android:textColor="#FFFFFF"
+                    android:gravity="center"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent" />
+
+                <ImageView
+                    android:id="@+id/profile_image2"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:src="@drawable/default_avatar"
+                    app:layout_constraintStart_toEndOf="@id/rank2"
+                    app:layout_constraintTop_toTopOf="parent"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/name2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textSize="16sp"
+                    android:textColor="#000000"
+                    app:layout_constraintStart_toEndOf="@id/profile_image2"
+                    app:layout_constraintTop_toTopOf="@id/profile_image2"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/level_xp2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textSize="14sp"
+                    android:textColor="#000000"
+                    app:layout_constraintStart_toEndOf="@id/profile_image2"
+                    app:layout_constraintTop_toBottomOf="@id/name2"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/crown2"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="*Winner*"
+                    android:textSize="12sp"
+                    android:textColor="#FFD700"
+                    app:layout_constraintStart_toEndOf="@id/name2"
+                    app:layout_constraintTop_toTopOf="@id/name2"
+                    android:layout_marginStart="8dp" />
+            </androidx.constraintlayout.widget.ConstraintLayout>
+
+            <!-- User Item 3 -->
+            <androidx.constraintlayout.widget.ConstraintLayout
+                android:id="@+id/user_item_3"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:id="@+id/rank3"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/circle_purple"
+                    android:text="#3"
+                    android:textColor="#FFFFFF"
+                    android:gravity="center"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintTop_toTopOf="parent" />
+
+                <ImageView
+                    android:id="@+id/profile_image3"
+                    android:layout_width="50dp"
+                    android:layout_height="50dp"
+                    android:src="@drawable/default_avatar"
+                    app:layout_constraintStart_toEndOf="@id/rank3"
+                    app:layout_constraintTop_toTopOf="parent"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/name3"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textSize="16sp"
+                    android:textColor="#000000"
+                    app:layout_constraintStart_toEndOf="@id/profile_image3"
+                    app:layout_constraintTop_toTopOf="@id/profile_image3"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/level_xp3"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text=""
+                    android:textSize="14sp"
+                    android:textColor="#000000"
+                    app:layout_constraintStart_toEndOf="@id/profile_image3"
+                    app:layout_constraintTop_toBottomOf="@id/name3"
+                    android:layout_marginStart="8dp" />
+
+                <TextView
+                    android:id="@+id/crown3"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="*Winner*"
+                    android:textSize="12sp"
+                    android:textColor="#FFD700"
+                    app:layout_constraintStart_toEndOf="@id/name3"
+                    app:layout_constraintTop_toTopOf="@id/name3"
+                    android:layout_marginStart="8dp" />
+            </androidx.constraintlayout.widget.ConstraintLayout>
+
+            <!-- User Items 4-10 (Dynamic) -->
+            <LinearLayout
+                android:id="@+id/user_items_4_10"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <!-- Bottom Container (Fixed) -->
+    <LinearLayout
+        android:id="@+id/bottom_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#FFFFFF"
+        android:elevation="4dp"
+        app:layout_constraintBottom_toBottomOf="parent">
+
+        <!-- User Rank Layout -->
+        <LinearLayout
+            android:id="@+id/user_rank_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="8dp"
+            android:background="#e6e6fa">
+
+            <!-- Row for Profile Image and Progress Bar -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="4dp">
+
+                <ImageView
+                    android:id="@+id/user_profile_image"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:contentDescription="User Profile Image"
+                    android:src="@drawable/default_avatar"
+                    android:layout_marginEnd="8dp" />
+
+                <ProgressBar
+                    android:id="@+id/user_progress_bar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="100"
+                    android:progress="0"
+                    android:progressTint="#e040fb" />
+            </LinearLayout>
+
+            <!-- Row for Rank and XP Text -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/user_rank_text"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:text="Peringkat Anda"
+                    android:textColor="#000000"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/user_xp_text"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0K XP"
+                    android:textColor="#000000"
+                    android:textSize="14sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Bottom Navigation -->
+        <com.google.android.material.bottomnavigation.BottomNavigationView
+            android:id="@+id/bottom_navigation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#FFFFFF"
+            app:itemIconTint="@color/nav_icon_color"
+            app:itemTextColor="@color/nav_icon_color"
+            app:menu="@menu/bottom_nav_menu"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:labelVisibilityMode="labeled" />
+    </LinearLayout>
+
+</androidx.constraintlayout.widget.ConstraintLayout>

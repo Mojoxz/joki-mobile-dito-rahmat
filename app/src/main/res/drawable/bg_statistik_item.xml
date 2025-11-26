@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- res/drawable/bg_statistik_item.xml -->
+<!-- res/drawable/bg_statistik_item.xml -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Lapisan background transparan -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000"/> <!-- Transparan -->
+            <corners android:radius="12dp"/> <!-- Radius sesuai tampilan -->
+        </shape>
+    </item>
+
+    <!-- Lapisan putih dengan opacity 30% -->
+    <item android:top="0dp" android:bottom="0dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#4DFFFFFF"/> <!-- #FFFFFF dengan 30% opacity -->
+            <corners android:radius="12dp"/>
+        </shape>
+    </item>
+</layer-list>
