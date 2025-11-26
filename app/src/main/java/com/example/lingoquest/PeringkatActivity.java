@@ -3,7 +3,6 @@ package com.example.lingoquest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
@@ -14,6 +13,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.constraintlayout.widget.ConstraintSet;
@@ -21,6 +21,11 @@ import androidx.core.view.WindowCompat;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.tabs.TabLayout;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
@@ -33,8 +38,8 @@ import java.util.Locale;
 
 public class PeringkatActivity extends AppCompatActivity {
 
-    private DatabaseHelper db;
-    private int userId;
+    private DatabaseReference mDatabase;
+    private String userId;
     private TabLayout tabLayout;
     private LinearLayout userItems4To10;
     private TextView userRankText, userXpText;
@@ -50,11 +55,11 @@ public class PeringkatActivity extends AppCompatActivity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
         setContentView(R.layout.activity_peringkat);
 
-        // Inisialisasi DatabaseHelper dan userId
-        db = new DatabaseHelper(this);
+        // Inisialisasi Firebase dan userId
+        mDatabase = FirebaseDatabase.getInstance().getReference();
         SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", Context.MODE_PRIVATE);
-        userId = prefs.getInt("user_id", -1);
-        if (userId == -1) {
+        userId = prefs.getString("user_id", null);
+        if (userId == null) {
             startActivity(new Intent(this, LoginActivity.class));
             finish();
             return;
@@ -121,16 +126,23 @@ public class PeringkatActivity extends AppCompatActivity {
         userItems4To10.removeAllViews();
 
         // Ambil data leaderboard
-        List<UserData> users = getLeaderboardData();
-        if (users == null || users.isEmpty()) {
-            // Jika tidak ada data, set peringkat pengguna saat ini sebagai #1
-            UserData currentUser = getCurrentUserData();
-            if (currentUser != null) {
-                users = new ArrayList<>();
-                users.add(currentUser);
+        getLeaderboardData(users -> {
+            if (users == null || users.isEmpty()) {
+                // Jika tidak ada data, set peringkat pengguna saat ini sebagai #1
+                getCurrentUserData(currentUser -> {
+                    if (currentUser != null) {
+                        users.clear();
+                        users.add(currentUser);
+                        displayLeaderboard(users);
+                    }
+                });
+            } else {
+                displayLeaderboard(users);
             }
-        }
+        });
+    }
 
+    private void displayLeaderboard(List<UserData> users) {
         // Tampilkan Top 3 pengguna
         if (users.size() > 0) updateTopUser(findViewById(R.id.user_item_1), users.get(0), 1);
         if (users.size() > 1) updateTopUser(findViewById(R.id.user_item_2), users.get(1), 2);
@@ -145,55 +157,147 @@ public class PeringkatActivity extends AppCompatActivity {
         updateUserRank(users);
     }
 
-    private List<UserData> getLeaderboardData() {
+    private void getLeaderboardData(LeaderboardCallback callback) {
         List<UserData> users = new ArrayList<>();
-        Cursor cursor = db.getXpByPeriod(currentFilter, 10); // Ambil 10 pengguna teratas
+        String startDate = getStartDateForFilter(currentFilter);
+        String endDate = getCurrentDate();
 
-        while (cursor.moveToNext()) {
-            int id = cursor.getInt(cursor.getColumnIndexOrThrow("user_id"));
-            String username = cursor.getString(cursor.getColumnIndexOrThrow("username"));
-            String avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow("avatar_url"));
-            int xp = cursor.isNull(cursor.getColumnIndexOrThrow("total_xp")) ? 0 : cursor.getInt(cursor.getColumnIndexOrThrow("total_xp"));
-            // Ambil level dari user_game_progress (default ke 1 jika tidak ada)
-            int level = 1;
-            Cursor levelCursor = db.getUserGameProgress(id, 1); // Asumsi language_id = 1 untuk sederhana
-            if (levelCursor.moveToFirst()) {
-                level = levelCursor.getInt(levelCursor.getColumnIndexOrThrow("current_level"));
-            }
-            levelCursor.close();
-            users.add(new UserData(id, username, avatarUrl, xp, level));
-        }
-        cursor.close();
-
-        // Urutkan berdasarkan XP (descending)
-        Collections.sort(users, new Comparator<UserData>() {
+        mDatabase.child("users").addListenerForSingleValueEvent(new ValueEventListener() {
             @Override
-            public int compare(UserData u1, UserData u2) {
-                return u2.getXp() - u1.getXp();
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                for (DataSnapshot userSnapshot : dataSnapshot.getChildren()) {
+                    String uid = userSnapshot.getKey();
+                    String username = userSnapshot.child("username").getValue(String.class);
+                    String avatarUrl = userSnapshot.child("avatar_url").getValue(String.class);
+
+                    // Hitung total XP berdasarkan periode
+                    calculateXpForPeriod(uid, startDate, endDate, xp -> {
+                        // Ambil level dari user_game_progress
+                        getLevel(uid, level -> {
+                            users.add(new UserData(uid, username, avatarUrl, xp, level));
+
+                            // Setelah semua data dikumpulkan
+                            if (users.size() == (int) dataSnapshot.getChildrenCount()) {
+                                // Urutkan berdasarkan XP (descending)
+                                Collections.sort(users, (u1, u2) -> u2.getXp() - u1.getXp());
+
+                                // Ambil 10 teratas
+                                List<UserData> top10 = users.subList(0, Math.min(10, users.size()));
+                                callback.onDataLoaded(top10);
+                            }
+                        });
+                    });
+                }
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                Log.e("PeringkatActivity", "Error loading leaderboard: " + databaseError.getMessage());
+                callback.onDataLoaded(users);
             }
         });
-
-        return users;
     }
 
-    private UserData getCurrentUserData() {
-        Cursor cursor = db.getXpByPeriod(currentFilter, 1); // Ambil data pengguna saat ini
-        UserData currentUser = null;
-        if (cursor.moveToFirst()) {
-            int id = cursor.getInt(cursor.getColumnIndexOrThrow("user_id"));
-            String username = cursor.getString(cursor.getColumnIndexOrThrow("username"));
-            String avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow("avatar_url"));
-            int xp = cursor.isNull(cursor.getColumnIndexOrThrow("total_xp")) ? 0 : cursor.getInt(cursor.getColumnIndexOrThrow("total_xp"));
-            int level = 1;
-            Cursor levelCursor = db.getUserGameProgress(id, 1);
-            if (levelCursor.moveToFirst()) {
-                level = levelCursor.getInt(levelCursor.getColumnIndexOrThrow("current_level"));
+    private void calculateXpForPeriod(String uid, String startDate, String endDate, XpCallback callback) {
+        mDatabase.child("xp_history").child(uid)
+                .orderByChild("timestamp")
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                        int totalXp = 0;
+                        for (DataSnapshot xpSnapshot : dataSnapshot.getChildren()) {
+                            String timestamp = xpSnapshot.child("timestamp").getValue(String.class);
+                            if (timestamp != null && isWithinPeriod(timestamp, startDate, endDate)) {
+                                Integer xp = xpSnapshot.child("xp").getValue(Integer.class);
+                                if (xp != null) {
+                                    totalXp += xp;
+                                }
+                            }
+                        }
+                        callback.onXpCalculated(totalXp);
+                    }
+
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError databaseError) {
+                        callback.onXpCalculated(0);
+                    }
+                });
+    }
+
+    private void getLevel(String uid, LevelCallback callback) {
+        mDatabase.child("user_game_progress").child(uid)
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                        int maxLevel = 1;
+                        for (DataSnapshot langSnapshot : dataSnapshot.getChildren()) {
+                            Integer level = langSnapshot.child("current_level").getValue(Integer.class);
+                            if (level != null && level > maxLevel) {
+                                maxLevel = level;
+                            }
+                        }
+                        callback.onLevelLoaded(maxLevel);
+                    }
+
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError databaseError) {
+                        callback.onLevelLoaded(1);
+                    }
+                });
+    }
+
+    private void getCurrentUserData(UserDataCallback callback) {
+        String startDate = getStartDateForFilter(currentFilter);
+        String endDate = getCurrentDate();
+
+        mDatabase.child("users").child(userId).addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                String username = dataSnapshot.child("username").getValue(String.class);
+                String avatarUrl = dataSnapshot.child("avatar_url").getValue(String.class);
+
+                calculateXpForPeriod(userId, startDate, endDate, xp -> {
+                    getLevel(userId, level -> {
+                        callback.onUserDataLoaded(new UserData(userId, username, avatarUrl, xp, level));
+                    });
+                });
             }
-            levelCursor.close();
-            currentUser = new UserData(id, username, avatarUrl, xp, level);
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                callback.onUserDataLoaded(null);
+            }
+        });
+    }
+
+    private String getStartDateForFilter(String filter) {
+        Calendar calendar = Calendar.getInstance();
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+
+        switch (filter) {
+            case "Harian":
+                // Hari ini
+                return sdf.format(calendar.getTime());
+            case "Mingguan":
+                // Awal minggu (Senin)
+                calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY);
+                return sdf.format(calendar.getTime());
+            case "Bulanan":
+                // Awal bulan
+                calendar.set(Calendar.DAY_OF_MONTH, 1);
+                return sdf.format(calendar.getTime());
+            default:
+                return sdf.format(calendar.getTime());
         }
-        cursor.close();
-        return currentUser;
+    }
+
+    private String getCurrentDate() {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+        return sdf.format(Calendar.getInstance().getTime());
+    }
+
+    private boolean isWithinPeriod(String timestamp, String startDate, String endDate) {
+        return timestamp.compareTo(startDate) >= 0 && timestamp.compareTo(endDate) <= 0;
     }
 
     private void updateTopUser(View view, UserData user, int rank) {
@@ -205,7 +309,7 @@ public class PeringkatActivity extends AppCompatActivity {
         name.setText(user.getUsername());
         xp.setText(String.format("%.1fK XP", user.getXp() / 1000.0));
         loadProfileImage(profile, user.getAvatarUrl());
-        crown.setVisibility(rank <= 3 ? View.VISIBLE : View.GONE); // Tampilkan tanda *Winner* untuk Top 3
+        crown.setVisibility(rank <= 3 ? View.VISIBLE : View.GONE);
     }
 
     private void addUserItem(UserData user, int rank) {
@@ -216,7 +320,6 @@ public class PeringkatActivity extends AppCompatActivity {
         ));
         itemView.setPadding(0, 0, 0, dpToPx(16));
 
-        // Tambahkan TextView untuk peringkat
         TextView rankText = new TextView(this);
         rankText.setId(View.generateViewId());
         rankText.setLayoutParams(new ConstraintLayout.LayoutParams(dpToPx(40), dpToPx(40)));
@@ -226,14 +329,12 @@ public class PeringkatActivity extends AppCompatActivity {
         rankText.setGravity(android.view.Gravity.CENTER);
         itemView.addView(rankText);
 
-        // Tambahkan ImageView untuk foto profil
         ImageView profileImage = new ImageView(this);
         profileImage.setId(View.generateViewId());
         profileImage.setLayoutParams(new ConstraintLayout.LayoutParams(dpToPx(50), dpToPx(50)));
         loadProfileImage(profileImage, user.getAvatarUrl());
         itemView.addView(profileImage);
 
-        // Tambahkan TextView untuk nama pengguna
         TextView nameText = new TextView(this);
         nameText.setId(View.generateViewId());
         nameText.setLayoutParams(new ConstraintLayout.LayoutParams(ConstraintLayout.LayoutParams.WRAP_CONTENT, ConstraintLayout.LayoutParams.WRAP_CONTENT));
@@ -242,7 +343,6 @@ public class PeringkatActivity extends AppCompatActivity {
         nameText.setTextColor(getResources().getColor(android.R.color.black));
         itemView.addView(nameText);
 
-        // Tambahkan TextView untuk XP
         TextView xpText = new TextView(this);
         xpText.setId(View.generateViewId());
         xpText.setLayoutParams(new ConstraintLayout.LayoutParams(ConstraintLayout.LayoutParams.WRAP_CONTENT, ConstraintLayout.LayoutParams.WRAP_CONTENT));
@@ -251,7 +351,6 @@ public class PeringkatActivity extends AppCompatActivity {
         xpText.setTextColor(getResources().getColor(android.R.color.black));
         itemView.addView(xpText);
 
-        // Atur constraint untuk elemen-elemen
         ConstraintSet constraintSet = new ConstraintSet();
         constraintSet.clone(itemView);
         constraintSet.connect(rankText.getId(), ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START);
@@ -264,8 +363,7 @@ public class PeringkatActivity extends AppCompatActivity {
         constraintSet.connect(xpText.getId(), ConstraintSet.TOP, nameText.getId(), ConstraintSet.BOTTOM);
         constraintSet.applyTo(itemView);
 
-        // Ubah warna latar belakang peringkat 4-10
-        rankText.setBackgroundResource(R.color.light_purple); // #e6e6fa
+        rankText.setBackgroundResource(R.color.light_purple);
         rankText.setTextColor(getResources().getColor(android.R.color.black));
 
         userItems4To10.addView(itemView);
@@ -275,47 +373,41 @@ public class PeringkatActivity extends AppCompatActivity {
         int userRank = -1;
         int userXp = 0;
 
-        // Cari peringkat pengguna saat ini dalam daftar
         for (int i = 0; i < users.size(); i++) {
-            if (users.get(i).getId() == userId) {
+            if (users.get(i).getId().equals(userId)) {
                 userRank = i + 1;
                 userXp = users.get(i).getXp();
                 break;
             }
         }
 
-        // Jika pengguna tidak ada dalam daftar top 10, tambahkan dari getCurrentUserData
         if (userRank == -1) {
-            UserData currentUser = getCurrentUserData();
-            if (currentUser != null) {
-                users.add(currentUser);
-                Collections.sort(users, new Comparator<UserData>() {
-                    @Override
-                    public int compare(UserData u1, UserData u2) {
-                        return u2.getXp() - u1.getXp();
-                    }
-                });
-                for (int i = 0; i < users.size(); i++) {
-                    if (users.get(i).getId() == userId) {
-                        userRank = i + 1;
-                        userXp = users.get(i).getXp();
-                        break;
+            getCurrentUserData(currentUser -> {
+                if (currentUser != null) {
+                    users.add(currentUser);
+                    Collections.sort(users, (u1, u2) -> u2.getXp() - u1.getXp());
+                    for (int i = 0; i < users.size(); i++) {
+                        if (users.get(i).getId().equals(userId)) {
+                            updateUserRankUI(i + 1, users.get(i).getXp(), users);
+                            break;
+                        }
                     }
                 }
-            }
+            });
+        } else {
+            updateUserRankUI(userRank, userXp, users);
         }
+    }
 
-        // Ambil XP pengguna Top 1 sebagai target
+    private void updateUserRankUI(int userRank, int userXp, List<UserData> users) {
         int topXp = (users.size() > 0) ? users.get(0).getXp() : 0;
 
-        // Update UI
         if (userRank != -1) {
             userRankText.setText("Peringkat Anda #" + userRank);
             userXpText.setText(String.format("%.1fK XP", userXp / 1000.0));
 
-            // Hitung progres untuk menjadi Top 1
             if (userRank == 1) {
-                userProgressBar.setProgress(100); // Full jika peringkat 1
+                userProgressBar.setProgress(100);
             } else if (topXp > 0 && userXp < topXp) {
                 float progress = (float) userXp / topXp * 100;
                 if (progress < 0) progress = 0;
@@ -332,15 +424,19 @@ public class PeringkatActivity extends AppCompatActivity {
     }
 
     private void loadCurrentUserProfileImage() {
-        Cursor cursor = db.getReadableDatabase().rawQuery(
-                "SELECT avatar_url FROM users WHERE user_id = ?",
-                new String[]{String.valueOf(userId)});
-        String avatarUrl = null;
-        if (cursor.moveToFirst()) {
-            avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow("avatar_url"));
-        }
-        cursor.close();
-        loadProfileImage(userProfileImage, avatarUrl);
+        mDatabase.child("users").child(userId).child("avatar_url")
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                        String avatarUrl = dataSnapshot.getValue(String.class);
+                        loadProfileImage(userProfileImage, avatarUrl);
+                    }
+
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError databaseError) {
+                        loadProfileImage(userProfileImage, null);
+                    }
+                });
     }
 
     private void loadProfileImage(ImageView imageView, String avatarUrl) {
@@ -361,27 +457,36 @@ public class PeringkatActivity extends AppCompatActivity {
         }
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (db != null) {
-            db.close();
-        }
-    }
-
     private int dpToPx(int dp) {
         float density = getResources().getDisplayMetrics().density;
         return Math.round(dp * density);
     }
 
+    // Callback interfaces
+    interface LeaderboardCallback {
+        void onDataLoaded(List<UserData> users);
+    }
+
+    interface XpCallback {
+        void onXpCalculated(int xp);
+    }
+
+    interface LevelCallback {
+        void onLevelLoaded(int level);
+    }
+
+    interface UserDataCallback {
+        void onUserDataLoaded(UserData user);
+    }
+
     private static class UserData {
-        private int id;
+        private String id;
         private String username;
         private String avatarUrl;
         private int xp;
         private int level;
 
-        public UserData(int id, String username, String avatarUrl, int xp, int level) {
+        public UserData(String id, String username, String avatarUrl, int xp, int level) {
             this.id = id;
             this.username = username;
             this.avatarUrl = avatarUrl;
@@ -389,7 +494,7 @@ public class PeringkatActivity extends AppCompatActivity {
             this.level = level;
         }
 
-        public int getId() { return id; }
+        public String getId() { return id; }
         public String getUsername() { return username; }
         public String getAvatarUrl() { return avatarUrl; }
         public int getXp() { return xp; }

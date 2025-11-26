@@ -5,8 +5,6 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore;
@@ -21,6 +19,7 @@ import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.cardview.widget.CardView;
@@ -29,14 +28,21 @@ import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
 
-import android.content.ContentValues;
-
 import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
+import com.google.firebase.storage.FirebaseStorage;
+import com.google.firebase.storage.StorageReference;
 
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 public class ProfilActivity extends AppCompatActivity {
 
@@ -48,8 +54,9 @@ public class ProfilActivity extends AppCompatActivity {
     private ProgressBar progressBar;
     private CardView cvBadgePemula, cvBadgeRajin;
     private LinearLayout llEditProfile, llChangePassword, llLogout;
-    private DatabaseHelper dbHelper;
-    private int userId;
+    private DatabaseReference mDatabase;
+    private StorageReference mStorage;
+    private String userId;
     private static final int MAX_LEVEL = 50;
     private static final int XP_PER_LEVEL = 1000;
     private Uri cameraImageUri;
@@ -80,11 +87,12 @@ public class ProfilActivity extends AppCompatActivity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
         setContentView(R.layout.activity_profile);
 
-        dbHelper = new DatabaseHelper(this);
+        mDatabase = FirebaseDatabase.getInstance().getReference();
+        mStorage = FirebaseStorage.getInstance().getReference();
 
         SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        userId = prefs.getInt("user_id", -1);
-        if (userId == -1) {
+        userId = prefs.getString("user_id", null);
+        if (userId == null) {
             Toast.makeText(this, "User not logged in", Toast.LENGTH_SHORT).show();
             startActivity(new Intent(this, LoginActivity.class));
             finish();
@@ -100,7 +108,7 @@ public class ProfilActivity extends AppCompatActivity {
         tvWordsLearned = findViewById(R.id.words_learned);
         tvModulesCompleted = findViewById(R.id.modules_completed);
         tvChallengesToday = findViewById(R.id.challenges_today);
-        tvTotalXp = findViewById(R.id.total_xp); // Tambahkan inisialisasi untuk total_xp
+        tvTotalXp = findViewById(R.id.total_xp);
         cvBadgePemula = findViewById(R.id.badge_pemula);
         cvBadgeRajin = findViewById(R.id.badge_rajin);
         llEditProfile = findViewById(R.id.edit_profile_layout);
@@ -117,7 +125,7 @@ public class ProfilActivity extends AppCompatActivity {
         llLogout.setOnClickListener(v -> logout());
 
         BottomNavigationView bottomNav = findViewById(R.id.bottom_navigation);
-        bottomNav.setSelectedItemId(R.id.nav_profile); // Set "Profil" sebagai aktif
+        bottomNav.setSelectedItemId(R.id.nav_profile);
         bottomNav.setOnNavigationItemSelectedListener(item -> {
             NavigationItem navItem = NavigationItem.fromItemId(item.getItemId());
             if (navItem == null) return false;
@@ -143,46 +151,69 @@ public class ProfilActivity extends AppCompatActivity {
     }
 
     private void loadUserProfile() {
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        Cursor cursor = db.rawQuery("SELECT * FROM " + DatabaseHelper.TABLE_USERS +
-                " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-        if (cursor.moveToFirst()) {
-            String username = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_USERNAME));
-            String avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_AVATAR_URL));
-            tvUsername.setText(username);
-            loadProfileImage(avatarUrl);
-        }
-        cursor.close();
+        // Load user data
+        mDatabase.child("users").child(userId).addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                String username = dataSnapshot.child("username").getValue(String.class);
+                String avatarUrl = dataSnapshot.child("avatar_url").getValue(String.class);
 
-        Cursor statsCursor = db.rawQuery("SELECT " + DatabaseHelper.COLUMN_LEVEL + ", " + DatabaseHelper.COLUMN_POINTS +
-                " FROM " + DatabaseHelper.TABLE_USER_STATS +
-                " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-        if (statsCursor.moveToFirst()) {
-            int level = statsCursor.getInt(statsCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_LEVEL));
-            int totalXp = statsCursor.getInt(statsCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_POINTS));
-            tvLevelXp.setText("Level " + level + " • " + totalXp + " XP");
-            tvTotalXp.setText(String.format("%,d", totalXp)); // Perbarui total_xp di statistik
+                if (username != null) {
+                    tvUsername.setText(username);
+                }
+                loadProfileImage(avatarUrl);
+            }
 
-            int xpForCurrentLevel = (level - 1) * XP_PER_LEVEL;
-            int xpForNextLevel = level * XP_PER_LEVEL;
-            int xpProgress = totalXp - xpForCurrentLevel;
-            int xpNeeded = xpForNextLevel - xpForCurrentLevel;
-            int progressPercentage = (xpProgress * 100) / xpNeeded;
-            progressBar.setProgress(progressPercentage);
-            tvXpToNextLevel.setText((xpNeeded - xpProgress) + " XP to next level");
-        }
-        statsCursor.close();
-        db.close();
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                Log.e("ProfilActivity", "Error loading user: " + databaseError.getMessage());
+            }
+        });
+
+        // Load user stats
+        mDatabase.child("user_stats").child(userId).addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                Integer level = dataSnapshot.child("level").getValue(Integer.class);
+                Integer totalXp = dataSnapshot.child("points").getValue(Integer.class);
+
+                if (level == null) level = 1;
+                if (totalXp == null) totalXp = 0;
+
+                tvLevelXp.setText("Level " + level + " • " + totalXp + " XP");
+                tvTotalXp.setText(String.format("%,d", totalXp));
+
+                int xpForCurrentLevel = (level - 1) * XP_PER_LEVEL;
+                int xpForNextLevel = level * XP_PER_LEVEL;
+                int xpProgress = totalXp - xpForCurrentLevel;
+                int xpNeeded = xpForNextLevel - xpForCurrentLevel;
+                int progressPercentage = (xpProgress * 100) / xpNeeded;
+                progressBar.setProgress(progressPercentage);
+                tvXpToNextLevel.setText((xpNeeded - xpProgress) + " XP to next level");
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                Log.e("ProfilActivity", "Error loading stats: " + databaseError.getMessage());
+            }
+        });
     }
 
     private void loadProfileImage(String avatarUrl) {
         if (avatarUrl != null && !avatarUrl.isEmpty()) {
             try {
-                File file = new File(avatarUrl);
-                if (file.exists()) {
-                    ivProfilePicture.setImageURI(Uri.fromFile(file));
-                } else {
+                // Cek apakah URL lokal atau Firebase Storage
+                if (avatarUrl.startsWith("gs://") || avatarUrl.startsWith("https://")) {
+                    // Firebase Storage URL - bisa ditambahkan Glide/Picasso untuk load dari URL
                     ivProfilePicture.setImageResource(android.R.drawable.ic_menu_gallery);
+                } else {
+                    // Local file
+                    File file = new File(avatarUrl);
+                    if (file.exists()) {
+                        ivProfilePicture.setImageURI(Uri.fromFile(file));
+                    } else {
+                        ivProfilePicture.setImageResource(android.R.drawable.ic_menu_gallery);
+                    }
                 }
             } catch (Exception e) {
                 ivProfilePicture.setImageResource(android.R.drawable.ic_menu_gallery);
@@ -252,101 +283,167 @@ public class ProfilActivity extends AppCompatActivity {
     }
 
     private void updateProfilePicture(Uri imageUri) {
-        String avatarPath = dbHelper.saveImageToInternalStorage(this, imageUri, userId);
-        if (avatarPath != null) {
-            dbHelper.updateUserAvatar(userId, avatarPath);
-            loadProfileImage(avatarPath);
-            Toast.makeText(this, "Foto profil diperbarui", Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, "Gagal memperbarui foto profil", Toast.LENGTH_SHORT).show();
+        if (imageUri != null) {
+            // Upload ke Firebase Storage
+            StorageReference fileRef = mStorage.child("profile_images/" + userId + ".jpg");
+            fileRef.putFile(imageUri)
+                    .addOnSuccessListener(taskSnapshot -> {
+                        fileRef.getDownloadUrl().addOnSuccessListener(uri -> {
+                            String downloadUrl = uri.toString();
+                            // Update avatar_url di Firebase Database
+                            mDatabase.child("users").child(userId).child("avatar_url").setValue(downloadUrl)
+                                    .addOnSuccessListener(aVoid -> {
+                                        loadProfileImage(downloadUrl);
+                                        Toast.makeText(this, "Foto profil diperbarui", Toast.LENGTH_SHORT).show();
+                                    })
+                                    .addOnFailureListener(e -> {
+                                        Toast.makeText(this, "Gagal memperbarui database", Toast.LENGTH_SHORT).show();
+                                    });
+                        });
+                    })
+                    .addOnFailureListener(e -> {
+                        Toast.makeText(this, "Gagal upload foto", Toast.LENGTH_SHORT).show();
+                    });
         }
     }
 
     private void loadUserStats() {
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
+        // 1. Kata Dipelajari: Jumlah jawaban benar
+        mDatabase.child("user_stats").child(userId).child("correct_answers")
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                        Integer correctAnswers = dataSnapshot.getValue(Integer.class);
+                        if (correctAnswers == null) correctAnswers = 0;
+                        tvWordsLearned.setText(String.format("%,d", correctAnswers));
+                    }
 
-        // 1. Kata Dipelajari: Jumlah keseluruhan soal yang sudah dikerjakan (jawaban benar)
-        Cursor cursor = db.rawQuery("SELECT " + DatabaseHelper.COLUMN_CORRECT_ANSWERS +
-                " FROM " + DatabaseHelper.TABLE_USER_STATS +
-                " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-        if (cursor.moveToFirst()) {
-            int correctAnswers = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_CORRECT_ANSWERS));
-            tvWordsLearned.setText(String.format("%,d", correctAnswers)); // Format dengan pemisah ribuan
-        } else {
-            tvWordsLearned.setText("0");
-        }
-        cursor.close();
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError databaseError) {
+                        tvWordsLearned.setText("0");
+                    }
+                });
 
-        // 2. Modul Selesai: Jumlah bahasa yang progresnya 100% (level maksimum tercapai)
-        int modulesCompleted = 0;
-        Cursor langCursor = db.rawQuery("SELECT * FROM " + DatabaseHelper.TABLE_USER_LANGUAGES +
-                " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-        while (langCursor.moveToNext()) {
-            Cursor progressCursor = db.rawQuery("SELECT " + DatabaseHelper.COLUMN_CURRENT_LEVEL +
-                            " FROM " + DatabaseHelper.TABLE_USER_GAME_PROGRESS +
-                            " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ? AND " + DatabaseHelper.COLUMN_LANGUAGE_ID + " = ?",
-                    new String[]{String.valueOf(userId), String.valueOf(langCursor.getInt(langCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_LANGUAGE_ID)))});
-            if (progressCursor.moveToFirst()) {
-                int currentLevel = progressCursor.getInt(progressCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_CURRENT_LEVEL));
-                if (currentLevel >= MAX_LEVEL) { // Progres 100% jika level maksimum tercapai
-                    modulesCompleted++;
+        // 2. Modul Selesai: Jumlah bahasa dengan level maksimum
+        mDatabase.child("user_languages").child(userId).addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                int modulesCompleted = 0;
+                for (DataSnapshot langSnapshot : dataSnapshot.getChildren()) {
+                    String languageId = langSnapshot.getKey();
+                    // Check progress untuk bahasa ini
+                    checkLanguageProgress(languageId, isCompleted -> {
+                        // Implementasi counter di sini
+                    });
                 }
+                // Untuk simplifikasi, kita hitung dari user_game_progress
+                countCompletedModules();
             }
-            progressCursor.close();
-        }
-        langCursor.close();
-        tvModulesCompleted.setText(String.valueOf(modulesCompleted));
 
-        // 3. Tantangan Harian: Jumlah tantangan harian yang sudah diselesaikan pada hari ini
-        int challengesToday = 0;
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                tvModulesCompleted.setText("0");
+            }
+        });
+
+        // 3. Tantangan Harian: Misi yang selesai hari ini
         String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
-        Cursor challengeCursor = db.rawQuery("SELECT COUNT(*) FROM " + DatabaseHelper.TABLE_DAILY_MISSIONS +
-                        " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ? AND " + DatabaseHelper.COLUMN_DAILY_PROGRESS + " >= 10 AND " +
-                        "date(" + DatabaseHelper.COLUMN_LAST_UPDATED + ") = ?",
-                new String[]{String.valueOf(userId), today});
-        if (challengeCursor.moveToFirst()) {
-            challengesToday = challengeCursor.getInt(0); // Jumlah misi harian yang selesai hari ini
-        }
-        challengeCursor.close();
-        tvChallengesToday.setText(String.valueOf(challengesToday));
+        mDatabase.child("daily_missions").child(userId).addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                int challengesToday = 0;
+                for (DataSnapshot missionSnapshot : dataSnapshot.getChildren()) {
+                    Integer progress = missionSnapshot.child("daily_progress").getValue(Integer.class);
+                    String lastUpdated = missionSnapshot.child("last_updated").getValue(String.class);
+
+                    if (progress != null && progress >= 10 && lastUpdated != null && lastUpdated.startsWith(today)) {
+                        challengesToday++;
+                    }
+                }
+                tvChallengesToday.setText(String.valueOf(challengesToday));
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                tvChallengesToday.setText("0");
+            }
+        });
+    }
+
+    private void countCompletedModules() {
+        mDatabase.child("user_game_progress").child(userId).addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                int modulesCompleted = 0;
+                for (DataSnapshot langSnapshot : dataSnapshot.getChildren()) {
+                    Integer currentLevel = langSnapshot.child("current_level").getValue(Integer.class);
+                    if (currentLevel != null && currentLevel >= MAX_LEVEL) {
+                        modulesCompleted++;
+                    }
+                }
+                tvModulesCompleted.setText(String.valueOf(modulesCompleted));
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                tvModulesCompleted.setText("0");
+            }
+        });
+    }
+
+    private void checkLanguageProgress(String languageId, ProgressCallback callback) {
+        mDatabase.child("user_game_progress").child(userId).child(languageId).child("current_level")
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                        Integer level = dataSnapshot.getValue(Integer.class);
+                        callback.onProgressChecked(level != null && level >= MAX_LEVEL);
+                    }
+
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError databaseError) {
+                        callback.onProgressChecked(false);
+                    }
+                });
     }
 
     private void loadAchievements() {
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-
-        Cursor langCursor = db.rawQuery("SELECT * FROM " + DatabaseHelper.TABLE_USER_LANGUAGES +
-                " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-        boolean hasCompletedModule = false;
-        while (langCursor.moveToNext()) {
-            Cursor progressCursor = db.rawQuery("SELECT " + DatabaseHelper.COLUMN_CURRENT_LEVEL +
-                            " FROM " + DatabaseHelper.TABLE_USER_GAME_PROGRESS +
-                            " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ? AND " + DatabaseHelper.COLUMN_LANGUAGE_ID + " = ?",
-                    new String[]{String.valueOf(userId), String.valueOf(langCursor.getInt(langCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_LANGUAGE_ID)))});
-            if (progressCursor.moveToFirst()) {
-                int currentLevel = progressCursor.getInt(progressCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_CURRENT_LEVEL));
-                if (currentLevel >= 5) { // Badge Pemula: minimal level 5
-                    hasCompletedModule = true;
+        // Badge Pemula: minimal level 5 di salah satu bahasa
+        mDatabase.child("user_game_progress").child(userId).addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                boolean hasCompletedModule = false;
+                for (DataSnapshot langSnapshot : dataSnapshot.getChildren()) {
+                    Integer currentLevel = langSnapshot.child("current_level").getValue(Integer.class);
+                    if (currentLevel != null && currentLevel >= 5) {
+                        hasCompletedModule = true;
+                        break;
+                    }
                 }
+                cvBadgePemula.setVisibility(hasCompletedModule ? View.VISIBLE : View.GONE);
             }
-            progressCursor.close();
-        }
-        langCursor.close();
-        cvBadgePemula.setVisibility(hasCompletedModule ? View.VISIBLE : View.GONE);
 
-        Cursor statsCursor = db.rawQuery("SELECT " + DatabaseHelper.COLUMN_STREAK_DAYS +
-                " FROM " + DatabaseHelper.TABLE_USER_STATS +
-                " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-        boolean hasStreak = false;
-        if (statsCursor.moveToFirst()) {
-            int streakDays = statsCursor.getInt(statsCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_STREAK_DAYS));
-            if (streakDays >= 7) { // Badge Rajin: streak minimal 7 hari
-                hasStreak = true;
+            @Override
+            public void onCancelled(@NonNull DatabaseError databaseError) {
+                cvBadgePemula.setVisibility(View.GONE);
             }
-        }
-        statsCursor.close();
-        cvBadgeRajin.setVisibility(hasStreak ? View.VISIBLE : View.GONE);
+        });
 
-        db.close();
+        // Badge Rajin: streak minimal 7 hari
+        mDatabase.child("user_stats").child(userId).child("streak_days")
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                        Integer streakDays = dataSnapshot.getValue(Integer.class);
+                        boolean hasStreak = streakDays != null && streakDays >= 7;
+                        cvBadgeRajin.setVisibility(hasStreak ? View.VISIBLE : View.GONE);
+                    }
+
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError databaseError) {
+                        cvBadgeRajin.setVisibility(View.GONE);
+                    }
+                });
     }
 
     private void showEditProfileDialog() {
@@ -356,16 +453,19 @@ public class ProfilActivity extends AppCompatActivity {
 
         TextView etUsername = dialogView.findViewById(R.id.et_username);
 
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        Cursor cursor = db.rawQuery("SELECT " + DatabaseHelper.COLUMN_USERNAME +
-                " FROM " + DatabaseHelper.TABLE_USERS +
-                " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-        if (cursor.moveToFirst()) {
-            String currentUsername = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_USERNAME));
-            etUsername.setText(currentUsername);
-        }
-        cursor.close();
-        db.close();
+        mDatabase.child("users").child(userId).child("username")
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                        String currentUsername = dataSnapshot.getValue(String.class);
+                        if (currentUsername != null) {
+                            etUsername.setText(currentUsername);
+                        }
+                    }
+
+                    @Override
+                    public void onCancelled(@NonNull DatabaseError databaseError) {}
+                });
 
         builder.setTitle("Edit Profil")
                 .setPositiveButton("Simpan", (dialog, which) -> {
@@ -375,19 +475,14 @@ public class ProfilActivity extends AppCompatActivity {
                         return;
                     }
 
-                    SQLiteDatabase writeDb = dbHelper.getWritableDatabase();
-                    ContentValues values = new ContentValues();
-                    values.put(DatabaseHelper.COLUMN_USERNAME, newUsername);
-                    int rowsAffected = writeDb.update(DatabaseHelper.TABLE_USERS, values,
-                            DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-                    writeDb.close();
-
-                    if (rowsAffected > 0) {
-                        tvUsername.setText(newUsername);
-                        Toast.makeText(this, "Profil diperbarui", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(this, "Gagal memperbarui profil", Toast.LENGTH_SHORT).show();
-                    }
+                    mDatabase.child("users").child(userId).child("username").setValue(newUsername)
+                            .addOnSuccessListener(aVoid -> {
+                                tvUsername.setText(newUsername);
+                                Toast.makeText(this, "Profil diperbarui", Toast.LENGTH_SHORT).show();
+                            })
+                            .addOnFailureListener(e -> {
+                                Toast.makeText(this, "Gagal memperbarui profil", Toast.LENGTH_SHORT).show();
+                            });
                 })
                 .setNegativeButton("Batal", (dialog, which) -> dialog.dismiss())
                 .show();
@@ -418,34 +513,30 @@ public class ProfilActivity extends AppCompatActivity {
                         return;
                     }
 
-                    SQLiteDatabase db = dbHelper.getReadableDatabase();
-                    Cursor cursor = db.rawQuery("SELECT " + DatabaseHelper.COLUMN_PASSWORD +
-                            " FROM " + DatabaseHelper.TABLE_USERS +
-                            " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-                    if (cursor.moveToFirst()) {
-                        String currentPassword = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_PASSWORD));
-                        if (!currentPassword.equals(oldPassword)) {
-                            Toast.makeText(this, "Kata sandi lama salah", Toast.LENGTH_SHORT).show();
-                            cursor.close();
-                            db.close();
-                            return;
-                        }
-                    }
-                    cursor.close();
-                    db.close();
+                    mDatabase.child("users").child(userId).child("password")
+                            .addListenerForSingleValueEvent(new ValueEventListener() {
+                                @Override
+                                public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
+                                    String currentPassword = dataSnapshot.getValue(String.class);
+                                    if (currentPassword == null || !currentPassword.equals(oldPassword)) {
+                                        Toast.makeText(ProfilActivity.this, "Kata sandi lama salah", Toast.LENGTH_SHORT).show();
+                                        return;
+                                    }
 
-                    SQLiteDatabase writeDb = dbHelper.getWritableDatabase();
-                    ContentValues values = new ContentValues();
-                    values.put(DatabaseHelper.COLUMN_PASSWORD, newPassword);
-                    int rowsAffected = writeDb.update(DatabaseHelper.TABLE_USERS, values,
-                            DatabaseHelper.COLUMN_USER_ID + " = ?", new String[]{String.valueOf(userId)});
-                    writeDb.close();
+                                    mDatabase.child("users").child(userId).child("password").setValue(newPassword)
+                                            .addOnSuccessListener(aVoid -> {
+                                                Toast.makeText(ProfilActivity.this, "Kata sandi diperbarui", Toast.LENGTH_SHORT).show();
+                                            })
+                                            .addOnFailureListener(e -> {
+                                                Toast.makeText(ProfilActivity.this, "Gagal memperbarui kata sandi", Toast.LENGTH_SHORT).show();
+                                            });
+                                }
 
-                    if (rowsAffected > 0) {
-                        Toast.makeText(this, "Kata sandi diperbarui", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(this, "Gagal memperbarui kata sandi", Toast.LENGTH_SHORT).show();
-                    }
+                                @Override
+                                public void onCancelled(@NonNull DatabaseError databaseError) {
+                                    Toast.makeText(ProfilActivity.this, "Error: " + databaseError.getMessage(), Toast.LENGTH_SHORT).show();
+                                }
+                            });
                 })
                 .setNegativeButton("Batal", (dialog, which) -> dialog.dismiss())
                 .show();
@@ -464,11 +555,7 @@ public class ProfilActivity extends AppCompatActivity {
         finish();
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (dbHelper != null) {
-            dbHelper.close();
-        }
+    interface ProgressCallback {
+        void onProgressChecked(boolean isCompleted);
     }
 }

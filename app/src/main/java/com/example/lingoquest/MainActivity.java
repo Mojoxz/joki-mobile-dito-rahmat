@@ -2,12 +2,9 @@ package com.example.lingoquest;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -18,6 +15,7 @@ import androidx.core.view.WindowCompat;
 import android.view.WindowManager;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
+import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -30,23 +28,28 @@ public class MainActivity extends AppCompatActivity {
     private Timer timer;
     private Handler handler = new Handler(Looper.getMainLooper());
     private long challengeEndTime;
-    private DatabaseHelper dbHelper;
+    private FirebaseHelper firebaseHelper;
+    private String userId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        firebaseHelper = FirebaseHelper.getInstance();
 
         if (!isUserLoggedIn()) {
             startActivity(new Intent(this, LoginActivity.class));
             finish();
             return;
         }
+
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
 
         setContentView(R.layout.activity_main);
 
-        dbHelper = new DatabaseHelper(this);
+        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
+        userId = prefs.getString("user_id", null);
 
         ivAvatar = findViewById(R.id.avatar);
         tvLevel = findViewById(R.id.level_value);
@@ -97,42 +100,98 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadUserData() {
-        User user = getUserDataFromDatabase();
-        if (user != null) {
-            if (user.getAvatarUrl() != null && !user.getAvatarUrl().isEmpty()) {
-                Glide.with(this)
-                        .load(user.getAvatarUrl())
-                        .placeholder(R.drawable.default_avatar)
-                        .error(R.drawable.default_avatar)
-                        .into(ivAvatar);
-            } else {
-                ivAvatar.setImageResource(R.drawable.default_avatar);
+        if (userId == null) return;
+
+        // Load user data dari Firebase
+        firebaseHelper.getUserData(userId, new FirebaseHelper.UserDataCallback() {
+            @Override
+            public void onSuccess(Map<String, Object> userData) {
+                String avatarUrl = (String) userData.get("avatar_url");
+
+                if (avatarUrl != null && !avatarUrl.isEmpty()) {
+                    Glide.with(MainActivity.this)
+                            .load(avatarUrl)
+                            .placeholder(R.drawable.default_avatar)
+                            .error(R.drawable.default_avatar)
+                            .into(ivAvatar);
+                } else {
+                    ivAvatar.setImageResource(R.drawable.default_avatar);
+                }
             }
 
-            tvLevel.setText(String.valueOf(user.getLevel()));
-            tvPoints.setText(String.valueOf(user.getPoints()));
-            tvStreak.setText(user.getStreak() + " Hari");
-        }
+            @Override
+            public void onFailure(String error) {
+                ivAvatar.setImageResource(R.drawable.default_avatar);
+            }
+        });
+
+        // Load user stats dari Firebase
+        firebaseHelper.getUserStats(userId, new FirebaseHelper.UserDataCallback() {
+            @Override
+            public void onSuccess(Map<String, Object> stats) {
+                Long level = (Long) stats.get("level");
+                Long points = (Long) stats.get("points");
+                Long streakDays = (Long) stats.get("streak_days");
+
+                tvLevel.setText(String.valueOf(level != null ? level : 1));
+                tvPoints.setText(String.valueOf(points != null ? points : 0));
+                tvStreak.setText((streakDays != null ? streakDays : 0) + " Hari");
+            }
+
+            @Override
+            public void onFailure(String error) {
+                tvLevel.setText("1");
+                tvPoints.setText("0");
+                tvStreak.setText("0 Hari");
+            }
+        });
     }
 
     private void setChallengeTimer() {
-        Challenge challenge = getChallengeDataFromDatabase();
-        if (challenge != null) {
-            challengeEndTime = challenge.getEndTime();
-            if (challengeEndTime > System.currentTimeMillis()) {
-                timer = new Timer();
-                timer.scheduleAtFixedRate(new TimerTask() {
-                    @Override
-                    public void run() {
-                        updateTimer();
-                    }
-                }, 0, 1000);
-            } else {
-                tvTimer.setText("⏰ 00:00:00");
+        if (userId == null) return;
+
+        // Load daily mission data dari Firebase
+        firebaseHelper.getUserData(userId, new FirebaseHelper.UserDataCallback() {
+            @Override
+            public void onSuccess(Map<String, Object> userData) {
+                // Get daily mission untuk timer
+                com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                        .collection("daily_missions")
+                        .document(userId)
+                        .get()
+                        .addOnSuccessListener(document -> {
+                            if (document.exists()) {
+                                Long endTime = document.getLong("end_time");
+                                if (endTime != null) {
+                                    challengeEndTime = endTime;
+                                    if (challengeEndTime > System.currentTimeMillis()) {
+                                        timer = new Timer();
+                                        timer.scheduleAtFixedRate(new TimerTask() {
+                                            @Override
+                                            public void run() {
+                                                updateTimer();
+                                            }
+                                        }, 0, 1000);
+                                    } else {
+                                        tvTimer.setText("⏰ 00:00:00");
+                                    }
+                                } else {
+                                    tvTimer.setText("⏰ Tidak ada tantangan aktif");
+                                }
+                            } else {
+                                tvTimer.setText("⏰ Tidak ada tantangan aktif");
+                            }
+                        })
+                        .addOnFailureListener(e -> {
+                            tvTimer.setText("⏰ Tidak ada tantangan aktif");
+                        });
             }
-        } else {
-            tvTimer.setText("⏰ Tidak ada tantangan aktif");
-        }
+
+            @Override
+            public void onFailure(String error) {
+                tvTimer.setText("⏰ Tidak ada tantangan aktif");
+            }
+        });
     }
 
     private void updateTimer() {
@@ -170,48 +229,8 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean isUserLoggedIn() {
         SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        return prefs.getInt("user_id", -1) != -1;
-    }
-
-    private User getUserDataFromDatabase() {
-        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        int userId = prefs.getInt("user_id", -1);
-        if (userId == -1) return null;
-
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        String query = "SELECT u." + DatabaseHelper.COLUMN_AVATAR_URL + ", s." + DatabaseHelper.COLUMN_LEVEL + ", s." +
-                DatabaseHelper.COLUMN_POINTS + ", s." + DatabaseHelper.COLUMN_STREAK_DAYS +
-                " FROM " + DatabaseHelper.TABLE_USERS + " u" +
-                " JOIN " + DatabaseHelper.TABLE_USER_STATS + " s ON u." + DatabaseHelper.COLUMN_USER_ID + " = s." + DatabaseHelper.COLUMN_USER_ID +
-                " WHERE u." + DatabaseHelper.COLUMN_USER_ID + " = ?";
-        Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(userId)});
-
-        User user = null;
-        if (cursor.moveToFirst()) {
-            String avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_AVATAR_URL));
-            int level = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_LEVEL));
-            int points = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_POINTS));
-            int streak = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_STREAK_DAYS));
-            user = new User(avatarUrl, level, points, streak);
-        }
-        cursor.close();
-        return user;
-    }
-
-    private Challenge getChallengeDataFromDatabase() {
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        String query = "SELECT " + DatabaseHelper.COLUMN_END_TIME +
-                " FROM " + DatabaseHelper.TABLE_DAILY_CHALLENGES +
-                " WHERE " + DatabaseHelper.COLUMN_END_TIME + " > strftime('%s', 'now') LIMIT 1";
-        Cursor cursor = db.rawQuery(query, null);
-
-        Challenge challenge = null;
-        if (cursor.moveToFirst()) {
-            long endTime = cursor.getLong(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_END_TIME)) * 1000;
-            challenge = new Challenge(endTime);
-        }
-        cursor.close();
-        return challenge;
+        String userId = prefs.getString("user_id", null);
+        return userId != null && firebaseHelper.isUserLoggedIn();
     }
 
     @Override
@@ -220,51 +239,6 @@ public class MainActivity extends AppCompatActivity {
         if (timer != null) {
             timer.cancel();
             timer = null;
-        }
-        if (dbHelper != null) {
-            dbHelper.close();
-        }
-    }
-
-    private static class User {
-        private String avatarUrl;
-        private int level;
-        private int points;
-        private int streak;
-
-        public User(String avatarUrl, int level, int points, int streak) {
-            this.avatarUrl = avatarUrl;
-            this.level = level;
-            this.points = points;
-            this.streak = streak;
-        }
-
-        public String getAvatarUrl() {
-            return avatarUrl;
-        }
-
-        public int getLevel() {
-            return level;
-        }
-
-        public int getPoints() {
-            return points;
-        }
-
-        public int getStreak() {
-            return streak;
-        }
-    }
-
-    private static class Challenge {
-        private long endTime;
-
-        public Challenge(long endTime) {
-            this.endTime = endTime;
-        }
-
-        public long getEndTime() {
-            return endTime;
         }
     }
 }

@@ -2,8 +2,8 @@ package com.example.lingoquest;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.database.Cursor;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -15,7 +15,7 @@ public class LoginActivity extends AppCompatActivity {
     EditText etEmail, etPassword;
     Button btnLogin;
     TextView tvToRegister;
-    DatabaseHelper db;
+    FirebaseHelper firebaseHelper;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,52 +26,61 @@ public class LoginActivity extends AppCompatActivity {
         etPassword = findViewById(R.id.passwordInput);
         btnLogin = findViewById(R.id.loginButton);
         tvToRegister = findViewById(R.id.tvToRegister);
-        db = new DatabaseHelper(LoginActivity.this);
+        firebaseHelper = FirebaseHelper.getInstance();
 
         // Cek apakah sudah login
         SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        int userId = prefs.getInt("user_id", -1);
-        if (userId != -1) {
-            if (db.isAdmin(userId)) {
-                startActivity(new Intent(this, AdminActivity.class));
-            } else {
-                startActivity(new Intent(this, MainActivity.class));
-            }
-            finish();
+        String userId = prefs.getString("user_id", null);
+
+        if (userId != null && firebaseHelper.isUserLoggedIn()) {
+            // Check if admin
+            firebaseHelper.isAdmin(userId, isAdmin -> {
+                if (isAdmin) {
+                    startActivity(new Intent(LoginActivity.this, AdminActivity.class));
+                } else {
+                    startActivity(new Intent(LoginActivity.this, MainActivity.class));
+                }
+                finish();
+            });
             return;
         }
 
         btnLogin.setOnClickListener(v -> {
-            String email = etEmail.getText().toString();
-            String password = etPassword.getText().toString();
+            String email = etEmail.getText().toString().trim();
+            String password = etPassword.getText().toString().trim();
 
             if (email.isEmpty() || password.isEmpty()) {
                 Toast.makeText(this, "Isi semua field", Toast.LENGTH_SHORT).show();
             } else {
-                Cursor cursor = db.getReadableDatabase().rawQuery(
-                        "SELECT * FROM " + DatabaseHelper.TABLE_USERS +
-                                " WHERE " + DatabaseHelper.COLUMN_EMAIL + " = ? AND " +
-                                DatabaseHelper.COLUMN_PASSWORD + " = ?",
-                        new String[]{email, password});
+                // Disable button saat proses login
+                btnLogin.setEnabled(false);
 
-                if (cursor.moveToFirst()) {
-                    int userIdFromDb = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_USER_ID));
-                    int isAdmin = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_IS_ADMIN));
+                firebaseHelper.loginUser(email, password, new FirebaseHelper.AuthCallback() {
+                    @Override
+                    public void onSuccess(String userId) {
+                        // Simpan user_id ke SharedPreferences
+                        SharedPreferences.Editor editor = prefs.edit();
+                        editor.putString("user_id", userId);
+                        editor.apply();
 
-                    SharedPreferences.Editor editor = prefs.edit();
-                    editor.putInt("user_id", userIdFromDb);
-                    editor.apply();
-
-                    if (isAdmin == 1) {
-                        startActivity(new Intent(this, AdminActivity.class));
-                    } else {
-                        startActivity(new Intent(this, MainActivity.class));
+                        // Check if admin
+                        firebaseHelper.isAdmin(userId, isAdmin -> {
+                            btnLogin.setEnabled(true);
+                            if (isAdmin) {
+                                startActivity(new Intent(LoginActivity.this, AdminActivity.class));
+                            } else {
+                                startActivity(new Intent(LoginActivity.this, MainActivity.class));
+                            }
+                            finish();
+                        });
                     }
-                    finish();
-                } else {
-                    Toast.makeText(this, "Email atau kata sandi salah", Toast.LENGTH_SHORT).show();
-                }
-                cursor.close();
+
+                    @Override
+                    public void onFailure(String error) {
+                        btnLogin.setEnabled(true);
+                        Toast.makeText(LoginActivity.this, "Email atau kata sandi salah", Toast.LENGTH_SHORT).show();
+                    }
+                });
             }
         });
 

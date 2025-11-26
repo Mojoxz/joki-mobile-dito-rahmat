@@ -2,8 +2,6 @@ package com.example.lingoquest;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -21,6 +19,7 @@ import com.bumptech.glide.Glide;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 public class GameFragment extends Fragment {
 
@@ -28,15 +27,17 @@ public class GameFragment extends Fragment {
     private Button btnOption1, btnOption2, btnOption3, btnOption4;
     private ImageView ivImage;
     private ProgressBar progressDailyMission, progressLearning;
-    private DatabaseHelper db;
-    private int userId, languageId;
+    private FirebaseHelper fbHelper;
+    private String userId, languageId;
     private String targetLanguage;
-    private int wordsCompleted = 0; // Progres harian
-    private int weeklyCompleted = 0; // Progres mingguan
+    private int wordsCompleted = 0;
+    private int weeklyCompleted = 0;
     private int timeSpent = 0;
     private Handler handler = new Handler(Looper.getMainLooper());
     private Runnable timerRunnable;
     private OnQuestionAnsweredListener listener;
+    private List<Map<String, Object>> questionsList = new ArrayList<>();
+    private int currentQuestionIndex = 0;
 
     public interface OnQuestionAnsweredListener {
         void onQuestionAnswered(boolean isCorrect);
@@ -57,30 +58,21 @@ public class GameFragment extends Fragment {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        db = new DatabaseHelper(requireContext());
+        fbHelper = FirebaseHelper.getInstance();
+
         if (getArguments() != null) {
             targetLanguage = getArguments().getString("language");
         }
 
-        SharedPreferences prefs = requireContext().getSharedPreferences("LingoQuestPrefs", Context.MODE_PRIVATE);
-        userId = prefs.getInt("user_id", -1);
-        if (userId == -1) {
+        userId = fbHelper.getCurrentUserId();
+        if (userId == null) {
             return;
         }
 
-        SQLiteDatabase readableDb = db.getReadableDatabase();
-        Cursor langCursor = readableDb.rawQuery(
-                "SELECT " + DatabaseHelper.COLUMN_LANGUAGE_ID + " FROM " + DatabaseHelper.TABLE_LANGUAGES +
-                        " WHERE " + DatabaseHelper.COLUMN_LANGUAGE_NAME + " = ?",
-                new String[]{targetLanguage});
-        if (langCursor.moveToFirst()) {
-            languageId = langCursor.getInt(langCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_LANGUAGE_ID));
-        } else {
-            languageId = 1;
-        }
-        langCursor.close();
-
-        loadProgress();
+        fbHelper.getLanguageId(targetLanguage, langId -> {
+            languageId = langId != null ? langId : "default_lang_id";
+            loadProgress();
+        });
     }
 
     @Override
@@ -102,117 +94,152 @@ public class GameFragment extends Fragment {
         tvDailyMission = view.findViewById(R.id.tvDailyMission);
         tvLearningMission = view.findViewById(R.id.tvLearningMission);
 
-        int currentLevel = getCurrentLevel();
-        int totalXp = 0;
-        int coins = 0;
-        SQLiteDatabase readableDb = db.getReadableDatabase();
-        Cursor progressCursor = readableDb.rawQuery(
-                "SELECT total_xp FROM user_game_progress WHERE user_id = ? AND language_id = ?",
-                new String[]{String.valueOf(userId), String.valueOf(languageId)});
-        if (progressCursor.moveToFirst()) {
-            totalXp = progressCursor.getInt(progressCursor.getColumnIndexOrThrow("total_xp"));
-        }
-        progressCursor.close();
-
-        Cursor statsCursor = readableDb.rawQuery(
-                "SELECT points FROM user_stats WHERE user_id = ?",
-                new String[]{String.valueOf(userId)});
-        if (statsCursor.moveToFirst()) {
-            coins = statsCursor.getInt(statsCursor.getColumnIndexOrThrow("points"));
-        }
-        statsCursor.close();
-
-        tvLevel.setText("Level " + currentLevel + ": Menerjemahkan Kata");
-        tvProgress.setText(wordsCompleted + "/5");
-        tvCoins.setText("💰 " + coins);
-        tvDailyMission.setText("Selesaikan 5 Kata");
-        tvLearningMission.setText("Belajar 10 Menit (" + (timeSpent / 60) + "/10 Menit)");
-
-        progressDailyMission.setProgress(wordsCompleted);
-        progressLearning.setProgress(timeSpent / 6);
-
+        loadInitialData();
         startLearningTimer();
-        loadQuestion(currentLevel);
         setupButtons();
 
         return view;
     }
-    private int getTotalXp() {
-        SQLiteDatabase readableDb = db.getReadableDatabase();
-        Cursor cursor = readableDb.rawQuery(
-                "SELECT total_xp FROM user_game_progress WHERE user_id = ? AND language_id = ?",
-                new String[]{String.valueOf(userId), String.valueOf(languageId)});
-        int totalXp = 0;
-        if (cursor.moveToFirst()) {
-            totalXp = cursor.getInt(cursor.getColumnIndexOrThrow("total_xp"));
-        }
-        cursor.close();
-        return totalXp;
+
+    private void loadInitialData() {
+        getCurrentLevel(currentLevel -> {
+            tvLevel.setText("Level " + currentLevel + ": Menerjemahkan Kata");
+
+            getTotalXp(totalXp -> {
+                fbHelper.getUserStats(userId, new FirebaseHelper.UserDataCallback() {
+                    @Override
+                    public void onSuccess(Map<String, Object> statsData) {
+                        Long points = (Long) statsData.get("points");
+                        int coins = points != null ? points.intValue() : 0;
+                        tvCoins.setText("💰 " + coins);
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        tvCoins.setText("💰 0");
+                    }
+                });
+            });
+
+            tvProgress.setText(wordsCompleted + "/5");
+            tvDailyMission.setText("Selesaikan 5 Kata");
+            tvLearningMission.setText("Belajar 10 Menit (" + (timeSpent / 60) + "/10 Menit)");
+
+            progressDailyMission.setProgress(wordsCompleted);
+            progressLearning.setProgress(timeSpent / 6);
+
+            loadQuestion(currentLevel);
+        });
+    }
+
+    private void getTotalXp(XpLoadCallback callback) {
+        fbHelper.getUserGameProgress(userId, languageId, new FirebaseHelper.UserDataCallback() {
+            @Override
+            public void onSuccess(Map<String, Object> progressData) {
+                Long totalXp = (Long) progressData.get("total_xp");
+                callback.onXpLoaded(totalXp != null ? totalXp.intValue() : 0);
+            }
+
+            @Override
+            public void onFailure(String error) {
+                callback.onXpLoaded(0);
+            }
+        });
     }
 
     private void loadQuestion(int level) {
-        SQLiteDatabase readableDb = db.getReadableDatabase();
-        Cursor cursor = readableDb.rawQuery(
-                "SELECT * FROM game_questions WHERE language_id = ? AND question_level = ?",
-                new String[]{String.valueOf(languageId), String.valueOf(level)});
-        if (cursor.moveToFirst()) {
-            String questionText = cursor.getString(cursor.getColumnIndexOrThrow("question_text"));
-            String correctAnswer = cursor.getString(cursor.getColumnIndexOrThrow("correct_answer"));
-            String imageUrl = cursor.getString(cursor.getColumnIndexOrThrow("image_url"));
-            List<String> options = new ArrayList<>();
-            options.add(cursor.getString(cursor.getColumnIndexOrThrow("option_1")));
-            options.add(cursor.getString(cursor.getColumnIndexOrThrow("option_2")));
-            options.add(cursor.getString(cursor.getColumnIndexOrThrow("option_3")));
-            options.add(cursor.getString(cursor.getColumnIndexOrThrow("option_4")));
-
-            tvQuestion.setText(questionText);
-            if (imageUrl != null && !imageUrl.isEmpty()) {
-                if (imageUrl.startsWith("@drawable")) {
-                    String drawableName = imageUrl.substring(10); // Hapus "@drawable/"
-                    int resId = getResources().getIdentifier(drawableName, "drawable", requireContext().getPackageName());
-                    if (resId != 0) {
-                        ivImage.setImageResource(resId);
-                    } else {
-                        ivImage.setImageResource(R.drawable.bg_image);
-                    }
+        fbHelper.getGameQuestions(languageId, level, new FirebaseHelper.QuestionsCallback() {
+            @Override
+            public void onSuccess(List<Map<String, Object>> questions) {
+                if (!questions.isEmpty()) {
+                    questionsList = questions;
+                    currentQuestionIndex = 0;
+                    displayQuestion(questionsList.get(currentQuestionIndex));
                 } else {
-                    Glide.with(this).load(imageUrl).placeholder(R.drawable.bg_image).error(R.drawable.bg_image).into(ivImage);
+                    // Try next level
+                    fbHelper.getGameQuestions(languageId, level + 1, new FirebaseHelper.QuestionsCallback() {
+                        @Override
+                        public void onSuccess(List<Map<String, Object>> nextQuestions) {
+                            if (!nextQuestions.isEmpty()) {
+                                getTotalXp(totalXp -> {
+                                    fbHelper.updateUserGameProgress(userId, languageId, level + 1, totalXp, null);
+                                    loadQuestion(level + 1);
+                                });
+                            } else {
+                                showCompletionMessage();
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(String error) {
+                            showCompletionMessage();
+                        }
+                    });
+                }
+            }
+
+            @Override
+            public void onFailure(String error) {
+                Toast.makeText(requireContext(), "Error loading questions", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void displayQuestion(Map<String, Object> question) {
+        String questionText = (String) question.get("question_text");
+        String correctAnswer = (String) question.get("correct_answer");
+        String imageUrl = (String) question.get("image_url");
+
+        List<String> options = new ArrayList<>();
+        options.add((String) question.get("option_1"));
+        options.add((String) question.get("option_2"));
+        options.add((String) question.get("option_3"));
+        options.add((String) question.get("option_4"));
+
+        tvQuestion.setText(questionText);
+
+        if (imageUrl != null && !imageUrl.isEmpty()) {
+            if (imageUrl.startsWith("@drawable")) {
+                String drawableName = imageUrl.substring(10);
+                int resId = getResources().getIdentifier(drawableName, "drawable", requireContext().getPackageName());
+                if (resId != 0) {
+                    ivImage.setImageResource(resId);
+                } else {
+                    ivImage.setImageResource(R.drawable.bg_image);
                 }
             } else {
-                ivImage.setImageResource(R.drawable.bg_image);
+                Glide.with(this)
+                        .load(imageUrl)
+                        .placeholder(R.drawable.bg_image)
+                        .error(R.drawable.bg_image)
+                        .into(ivImage);
             }
-
-            Collections.shuffle(options);
-            btnOption1.setText(options.get(0));
-            btnOption2.setText(options.get(1));
-            btnOption3.setText(options.get(2));
-            btnOption4.setText(options.get(3));
-            btnOption1.setVisibility(View.VISIBLE);
-            btnOption2.setVisibility(View.VISIBLE);
-            btnOption3.setVisibility(View.VISIBLE);
-            btnOption4.setVisibility(View.VISIBLE);
         } else {
-            // Cek apakah ada soal di level berikutnya
-            Cursor nextLevelCursor = readableDb.rawQuery(
-                    "SELECT * FROM game_questions WHERE language_id = ? AND question_level = ?",
-                    new String[]{String.valueOf(languageId), String.valueOf(level + 1)});
-            if (nextLevelCursor.moveToFirst()) {
-                db.updateUserGameProgress(userId, languageId, level + 1, getTotalXp());
-                loadQuestion(level + 1);
-            } else {
-                tvQuestion.setText("Semua soal telah selesai!");
-                btnOption1.setText("Kembali");
-                btnOption1.setVisibility(View.VISIBLE);
-                btnOption1.setOnClickListener(v -> requireActivity().finish());
-                btnOption2.setVisibility(View.GONE);
-                btnOption3.setVisibility(View.GONE);
-                btnOption4.setVisibility(View.GONE);
-                tvSelectedAnswer.setText("");
-                ivImage.setImageResource(R.drawable.bg_image);
-            }
-            nextLevelCursor.close();
+            ivImage.setImageResource(R.drawable.bg_image);
         }
-        cursor.close();
+
+        Collections.shuffle(options);
+        btnOption1.setText(options.get(0));
+        btnOption2.setText(options.get(1));
+        btnOption3.setText(options.get(2));
+        btnOption4.setText(options.get(3));
+
+        btnOption1.setVisibility(View.VISIBLE);
+        btnOption2.setVisibility(View.VISIBLE);
+        btnOption3.setVisibility(View.VISIBLE);
+        btnOption4.setVisibility(View.VISIBLE);
+    }
+
+    private void showCompletionMessage() {
+        tvQuestion.setText("Semua soal telah selesai!");
+        btnOption1.setText("Kembali");
+        btnOption1.setVisibility(View.VISIBLE);
+        btnOption1.setOnClickListener(v -> requireActivity().finish());
+        btnOption2.setVisibility(View.GONE);
+        btnOption3.setVisibility(View.GONE);
+        btnOption4.setVisibility(View.GONE);
+        tvSelectedAnswer.setText("");
+        ivImage.setImageResource(R.drawable.bg_image);
     }
 
     private void setupButtons() {
@@ -221,15 +248,10 @@ public class GameFragment extends Fragment {
             String selectedAnswer = clickedButton.getText().toString();
             tvSelectedAnswer.setText("Jawab: " + selectedAnswer);
 
-            SQLiteDatabase readableDb = db.getReadableDatabase();
-            Cursor cursor = readableDb.rawQuery(
-                    "SELECT correct_answer FROM game_questions WHERE language_id = ? AND question_level = ?",
-                    new String[]{String.valueOf(languageId), String.valueOf(getCurrentLevel())});
-            String correctAnswer = "";
-            if (cursor.moveToFirst()) {
-                correctAnswer = cursor.getString(cursor.getColumnIndexOrThrow("correct_answer"));
-            }
-            cursor.close();
+            if (questionsList.isEmpty()) return;
+
+            Map<String, Object> currentQuestion = questionsList.get(currentQuestionIndex);
+            String correctAnswer = (String) currentQuestion.get("correct_answer");
 
             boolean isCorrect = selectedAnswer.equals(correctAnswer);
             if (listener != null) {
@@ -238,68 +260,50 @@ public class GameFragment extends Fragment {
 
             if (isCorrect) {
                 Toast.makeText(requireContext(), "Benar! +10 XP", Toast.LENGTH_SHORT).show();
-                db.recordXpGain(userId, 10); // Catat XP ke xp_history
+                fbHelper.recordXpGain(userId, 10, null);
 
-                // Perbarui total_xp dan cek kenaikan level di user_game_progress
-                int currentLevel = getCurrentLevel();
-                int totalXp = getTotalXp() + 10;
-                if (totalXp >= currentLevel * 100) { // Naik level setiap 100 XP
-                    currentLevel++;
-                }
-                db.updateUserGameProgress(userId, languageId, currentLevel, totalXp);
+                getCurrentLevel(currentLevel -> {
+                    getTotalXp(totalXp -> {
+                        int newTotalXp = totalXp + 10;
+                        int newLevel = currentLevel;
+                        if (newTotalXp >= currentLevel * 100) {
+                            newLevel++;
+                        }
 
-                // Tambah progres harian
-                wordsCompleted++;
-                tvProgress.setText(wordsCompleted + "/5");
-                progressDailyMission.setProgress(wordsCompleted);
+                        int finalNewLevel = newLevel;
+                        fbHelper.updateUserGameProgress(userId, languageId, finalNewLevel, newTotalXp, null);
 
-                // Tambah progres mingguan
-                weeklyCompleted++;
-                saveProgress(); // Simpan progres harian dan mingguan ke database
+                        wordsCompleted++;
+                        tvProgress.setText(wordsCompleted + "/5");
+                        progressDailyMission.setProgress(wordsCompleted);
 
-                // Tambah jumlah kata yang dipelajari (correct_answers)
-                SQLiteDatabase writableDb = db.getWritableDatabase();
-                writableDb.execSQL(
-                        "UPDATE " + DatabaseHelper.TABLE_USER_STATS + " SET " + DatabaseHelper.COLUMN_CORRECT_ANSWERS + " = " + DatabaseHelper.COLUMN_CORRECT_ANSWERS + " + 1 " +
-                                "WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?",
-                        new Object[]{userId}
-                );
-                writableDb.close();
+                        weeklyCompleted++;
+                        saveProgress();
 
-                // Cek jika misi harian selesai
-                if (wordsCompleted >= 10) { // Ubah target menjadi 5 soal sesuai UI
-                    Toast.makeText(requireContext(), "Misi Harian Selesai! +50 XP", Toast.LENGTH_SHORT).show();
-                    db.recordXpGain(userId, 50); // Catat XP misi harian
-                    totalXp += 50;
-                    if (totalXp >= currentLevel * 100) {
-                        currentLevel++;
-                    }
-                    db.updateUserGameProgress(userId, languageId, currentLevel, totalXp);
-                    updateMissionProgress(true, 50);
-                    wordsCompleted = 0;
-                    tvProgress.setText("0/5");
-                    progressDailyMission.setProgress(0);
-                } else {
-                    updateMissionProgress(false, 0);
-                }
+                        if (wordsCompleted >= 10) {
+                            Toast.makeText(requireContext(), "Misi Harian Selesai! +50 XP", Toast.LENGTH_SHORT).show();
+                            fbHelper.recordXpGain(userId, 50, null);
+                            int bonusXp = newTotalXp + 50;
+                            int bonusLevel = finalNewLevel;
+                            if (bonusXp >= finalNewLevel * 100) {
+                                bonusLevel++;
+                            }
+                            fbHelper.updateUserGameProgress(userId, languageId, bonusLevel, bonusXp, null);
+                            wordsCompleted = 0;
+                            tvProgress.setText("0/5");
+                            progressDailyMission.setProgress(0);
+                        }
 
-                // Cek jika misi mingguan selesai
-                if (weeklyCompleted >= 50) {
-                    Toast.makeText(requireContext(), "Misi Mingguan Selesai! +200 XP", Toast.LENGTH_SHORT).show();
-                    db.recordXpGain(userId, 200); // Catat XP misi mingguan
-                    totalXp += 200;
-                    if (totalXp >= currentLevel * 100) {
-                        currentLevel++;
-                    }
-                    db.updateUserGameProgress(userId, languageId, currentLevel, totalXp);
-                    updateWeeklyProgress(true, 200);
-                    weeklyCompleted = 0;
-                } else {
-                    updateWeeklyProgress(false, 0);
-                }
+                        if (weeklyCompleted >= 50) {
+                            Toast.makeText(requireContext(), "Misi Mingguan Selesai! +200 XP", Toast.LENGTH_SHORT).show();
+                            fbHelper.recordXpGain(userId, 200, null);
+                            weeklyCompleted = 0;
+                        }
 
-                loadQuestion(currentLevel);
-                tvSelectedAnswer.setText("");
+                        loadQuestion(finalNewLevel);
+                        tvSelectedAnswer.setText("");
+                    });
+                });
             } else {
                 Toast.makeText(requireContext(), "Salah, coba lagi!", Toast.LENGTH_SHORT).show();
             }
@@ -320,8 +324,7 @@ public class GameFragment extends Fragment {
                 tvLearningMission.setText("Belajar 10 Menit (" + (timeSpent / 60) + "/10 Menit)");
                 if (timeSpent >= 600) {
                     Toast.makeText(requireContext(), "Target Belajar 10 Menit Tercapai! +30 XP", Toast.LENGTH_SHORT).show();
-                    db.recordXpGain(userId, 30); // Catat XP belajar ke xp_history
-                    updateLearningProgress(30);
+                    fbHelper.recordXpGain(userId, 30, null);
                     timeSpent = 0;
                     progressLearning.setProgress(0);
                     tvLearningMission.setText("Belajar 10 Menit (0/10 Menit)");
@@ -334,132 +337,32 @@ public class GameFragment extends Fragment {
     }
 
     private void loadProgress() {
-        SQLiteDatabase readableDb = db.getReadableDatabase();
-        Cursor cursor = readableDb.rawQuery(
-                "SELECT " + DatabaseHelper.COLUMN_DAILY_PROGRESS + " FROM " + DatabaseHelper.TABLE_DAILY_MISSIONS +
-                        " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?",
-                new String[]{String.valueOf(userId)});
-        if (cursor.moveToFirst()) {
-            wordsCompleted = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_DAILY_PROGRESS));
-        } else {
-            wordsCompleted = 0;
-        }
-        cursor.close();
-
-        Cursor weeklyCursor = readableDb.rawQuery(
-                "SELECT " + DatabaseHelper.COLUMN_WEEKLY_PROGRESS + " FROM " + DatabaseHelper.TABLE_WEEKLY_CHALLENGES +
-                        " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?",
-                new String[]{String.valueOf(userId)});
-        if (weeklyCursor.moveToFirst()) {
-            weeklyCompleted = weeklyCursor.getInt(weeklyCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_WEEKLY_PROGRESS));
-        } else {
-            weeklyCompleted = 0;
-        }
-        weeklyCursor.close();
-
-        Cursor learningCursor = readableDb.rawQuery(
-                "SELECT " + DatabaseHelper.COLUMN_WEEKLY_PROGRESS + " FROM " + DatabaseHelper.TABLE_WEEKLY_CHALLENGES +
-                        " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?",
-                new String[]{String.valueOf(userId)});
-        if (learningCursor.moveToFirst()) {
-            timeSpent = learningCursor.getInt(learningCursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_WEEKLY_PROGRESS));
-        } else {
-            timeSpent = 0;
-        }
-        learningCursor.close();
+        // Load daily progress from Firebase
+        // This would typically be stored in daily_missions collection
+        wordsCompleted = 0;
+        weeklyCompleted = 0;
+        timeSpent = 0;
     }
 
     private void saveProgress() {
-        SQLiteDatabase writableDb = db.getWritableDatabase();
-
-        // Cek dan simpan progres harian
-        Cursor cursor = writableDb.rawQuery(
-                "SELECT * FROM " + DatabaseHelper.TABLE_DAILY_MISSIONS + " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?",
-                new String[]{String.valueOf(userId)});
-        if (cursor.getCount() == 0) {
-            // Insert jika belum ada
-            writableDb.execSQL(
-                    "INSERT INTO " + DatabaseHelper.TABLE_DAILY_MISSIONS + " (" + DatabaseHelper.COLUMN_USER_ID + ", " +
-                            DatabaseHelper.COLUMN_DAILY_PROGRESS + ", " + DatabaseHelper.COLUMN_END_TIME + ", " +
-                            DatabaseHelper.COLUMN_LAST_UPDATED + ") VALUES (?, ?, ?, ?)",
-                    new Object[]{userId, wordsCompleted, System.currentTimeMillis() + 86400000,
-                            new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date())}
-            );
-        } else {
-            // Update jika sudah ada
-            writableDb.execSQL(
-                    "UPDATE " + DatabaseHelper.TABLE_DAILY_MISSIONS + " SET " + DatabaseHelper.COLUMN_DAILY_PROGRESS + " = ? " +
-                            "WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?",
-                    new Object[]{wordsCompleted, userId}
-            );
-        }
-        cursor.close();
-
-        // Cek dan simpan progres mingguan
-        Cursor weeklyCursor = writableDb.rawQuery(
-                "SELECT * FROM " + DatabaseHelper.TABLE_WEEKLY_CHALLENGES + " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?",
-                new String[]{String.valueOf(userId)});
-        if (weeklyCursor.getCount() == 0) {
-            // Insert jika belum ada
-            writableDb.execSQL(
-                    "INSERT INTO " + DatabaseHelper.TABLE_WEEKLY_CHALLENGES + " (" + DatabaseHelper.COLUMN_USER_ID + ", " +
-                            DatabaseHelper.COLUMN_WEEKLY_PROGRESS + ", " + DatabaseHelper.COLUMN_END_TIME + ") VALUES (?, ?, ?)",
-                    new Object[]{userId, weeklyCompleted, System.currentTimeMillis() + 604800000}
-            );
-        } else {
-            // Update jika sudah ada
-            writableDb.execSQL(
-                    "UPDATE " + DatabaseHelper.TABLE_WEEKLY_CHALLENGES + " SET " + DatabaseHelper.COLUMN_WEEKLY_PROGRESS + " = ? " +
-                            "WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?",
-                    new Object[]{weeklyCompleted, userId}
-            );
-        }
-        weeklyCursor.close();
+        // Save progress to Firebase
+        fbHelper.updateDailyMissionProgress(userId, wordsCompleted);
+        fbHelper.updateWeeklyProgress(userId, weeklyCompleted);
     }
 
-    private void updateMissionProgress(boolean missionCompleted, int xpGain) {
-        if (missionCompleted) {
-            SQLiteDatabase writableDb = db.getWritableDatabase();
-            writableDb.execSQL(
-                    "UPDATE user_stats SET points = points + ? WHERE user_id = ?",
-                    new Object[]{xpGain, userId}
-            );
-        }
-        saveProgress();
-    }
+    private void getCurrentLevel(LevelCallback callback) {
+        fbHelper.getUserGameProgress(userId, languageId, new FirebaseHelper.UserDataCallback() {
+            @Override
+            public void onSuccess(Map<String, Object> progressData) {
+                Long level = (Long) progressData.get("current_level");
+                callback.onLevelLoaded(level != null ? level.intValue() : 1);
+            }
 
-    private void updateWeeklyProgress(boolean missionCompleted, int xpGain) {
-        if (missionCompleted) {
-            SQLiteDatabase writableDb = db.getWritableDatabase();
-            writableDb.execSQL(
-                    "UPDATE user_stats SET points = points + ? WHERE user_id = ?",
-                    new Object[]{xpGain, userId}
-            );
-            writableDb.close();
-        }
-        saveProgress();
-    }
-
-    private void updateLearningProgress(int xpGain) {
-        SQLiteDatabase writableDb = db.getWritableDatabase();
-        writableDb.execSQL(
-                "UPDATE user_stats SET points = points + ? WHERE user_id = ?",
-                new Object[]{xpGain, userId}
-        );
-        saveProgress();
-    }
-
-    private int getCurrentLevel() {
-        SQLiteDatabase readableDb = db.getReadableDatabase();
-        Cursor cursor = readableDb.rawQuery(
-                "SELECT current_level FROM user_game_progress WHERE user_id = ? AND language_id = ?",
-                new String[]{String.valueOf(userId), String.valueOf(languageId)});
-        int level = 1;
-        if (cursor.moveToFirst()) {
-            level = cursor.getInt(cursor.getColumnIndexOrThrow("current_level"));
-        }
-        cursor.close();
-        return level;
+            @Override
+            public void onFailure(String error) {
+                callback.onLevelLoaded(1);
+            }
+        });
     }
 
     @Override
@@ -471,14 +374,23 @@ public class GameFragment extends Fragment {
     @Override
     public void onResume() {
         super.onResume();
-        handler.post(timerRunnable);
+        if (timerRunnable != null) {
+            handler.post(timerRunnable);
+        }
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
         handler.removeCallbacks(timerRunnable);
-        if (db != null) {
-        }
+    }
+
+    // Callback interfaces
+    interface LevelCallback {
+        void onLevelLoaded(int level);
+    }
+
+    interface XpLoadCallback {
+        void onXpLoaded(int xp);
     }
 }

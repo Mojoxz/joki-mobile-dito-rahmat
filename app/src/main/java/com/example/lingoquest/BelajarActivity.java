@@ -2,8 +2,6 @@ package com.example.lingoquest;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -20,13 +18,13 @@ import com.bumptech.glide.Glide;
 import androidx.core.view.WindowCompat;
 import android.view.WindowManager;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
-import android.content.ContentValues;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
-
 
 public class BelajarActivity extends AppCompatActivity {
 
@@ -37,24 +35,28 @@ public class BelajarActivity extends AppCompatActivity {
     private Timer timer;
     private Handler handler = new Handler(Looper.getMainLooper());
     private long challengeEndTime;
-    private DatabaseHelper dbHelper;
+    private FirebaseHelper firebaseHelper;
     private LinearLayout llLanguageList;
+    private String userId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        firebaseHelper = FirebaseHelper.getInstance();
 
         if (!isUserLoggedIn()) {
             startActivity(new Intent(this, LoginActivity.class));
             finish();
             return;
         }
+
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
 
         setContentView(R.layout.activity_belajar);
 
-        dbHelper = new DatabaseHelper(this);
+        userId = firebaseHelper.getCurrentUserId();
 
         ivAvatar = findViewById(R.id.avatar);
         tvTimer = findViewById(R.id.timer);
@@ -66,7 +68,6 @@ public class BelajarActivity extends AppCompatActivity {
         setChallengeTimer();
         loadLearnedLanguages();
 
-        // Atur listener untuk layout bahasa
         setupLanguageClickListeners();
 
         findViewById(R.id.layout_continue_learning).setOnClickListener(v -> showContinueLearningDialog());
@@ -114,27 +115,35 @@ public class BelajarActivity extends AppCompatActivity {
         }
     }
 
-    // Tambahkan metode untuk mendapatkan level bahasa
-    private int getLanguageLevel(String languageName) {
-        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        int userId = prefs.getInt("user_id", -1);
-        if (userId == -1) return 0;
-
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        String query = "SELECT ugp." + DatabaseHelper.COLUMN_CURRENT_LEVEL +
-                " FROM " + DatabaseHelper.TABLE_LANGUAGES + " l" +
-                " JOIN " + DatabaseHelper.TABLE_USER_LANGUAGES + " ul ON l." + DatabaseHelper.COLUMN_LANGUAGE_ID + " = ul." + DatabaseHelper.COLUMN_LANGUAGE_ID +
-                " LEFT JOIN " + DatabaseHelper.TABLE_USER_GAME_PROGRESS + " ugp ON ul." + DatabaseHelper.COLUMN_USER_ID + " = ugp." + DatabaseHelper.COLUMN_USER_ID +
-                " AND ul." + DatabaseHelper.COLUMN_LANGUAGE_ID + " = ugp." + DatabaseHelper.COLUMN_LANGUAGE_ID +
-                " WHERE ul." + DatabaseHelper.COLUMN_USER_ID + " = ? AND l." + DatabaseHelper.COLUMN_LANGUAGE_NAME + " = ?";
-        Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(userId), languageName});
-
-        int level = 0;
-        if (cursor.moveToFirst()) {
-            level = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_CURRENT_LEVEL));
+    private void getLanguageLevel(String languageName, LanguageLevelCallback callback) {
+        if (userId == null) {
+            callback.onResult(0);
+            return;
         }
-        cursor.close();
-        return level;
+
+        firebaseHelper.getLanguageId(languageName, languageId -> {
+            if (languageId == null) {
+                callback.onResult(0);
+                return;
+            }
+
+            firebaseHelper.getUserGameProgress(userId, languageId, new FirebaseHelper.UserDataCallback() {
+                @Override
+                public void onSuccess(Map<String, Object> userData) {
+                    Long level = (Long) userData.get("current_level");
+                    callback.onResult(level != null ? level.intValue() : 0);
+                }
+
+                @Override
+                public void onFailure(String error) {
+                    callback.onResult(0);
+                }
+            });
+        });
+    }
+
+    interface LanguageLevelCallback {
+        void onResult(int level);
     }
 
     @Override
@@ -144,53 +153,39 @@ public class BelajarActivity extends AppCompatActivity {
     }
 
     private void loadUserData() {
-        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        int userId = prefs.getInt("user_id", -1);
-        if (userId == -1) {
+        if (userId == null) {
             startActivity(new Intent(this, LoginActivity.class));
             finish();
             return;
         }
 
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        String query = "SELECT " + DatabaseHelper.COLUMN_AVATAR_URL +
-                " FROM " + DatabaseHelper.TABLE_USERS +
-                " WHERE " + DatabaseHelper.COLUMN_USER_ID + " = ?";
-        Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(userId)});
+        firebaseHelper.getUserData(userId, new FirebaseHelper.UserDataCallback() {
+            @Override
+            public void onSuccess(Map<String, Object> userData) {
+                String avatarUrl = (String) userData.get("avatar_url");
+                if (avatarUrl != null && !avatarUrl.isEmpty()) {
+                    Glide.with(BelajarActivity.this)
+                            .load(avatarUrl)
+                            .placeholder(R.drawable.default_avatar)
+                            .error(R.drawable.default_avatar)
+                            .into(ivAvatar);
+                } else {
+                    ivAvatar.setImageResource(R.drawable.default_avatar);
+                }
+            }
 
-        if (cursor.moveToFirst()) {
-            String avatarUrl = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_AVATAR_URL));
-            if (avatarUrl != null && !avatarUrl.isEmpty()) {
-                Glide.with(this)
-                        .load(avatarUrl)
-                        .placeholder(R.drawable.default_avatar)
-                        .error(R.drawable.default_avatar)
-                        .into(ivAvatar);
-            } else {
+            @Override
+            public void onFailure(String error) {
                 ivAvatar.setImageResource(R.drawable.default_avatar);
             }
-        } else {
-            ivAvatar.setImageResource(R.drawable.default_avatar);
-        }
-        cursor.close();
+        });
     }
 
     private void setChallengeTimer() {
-        Challenge challenge = getChallengeDataFromDatabase();
-        if (challenge != null) {
-            challengeEndTime = challenge.getEndTime();
-            if (challengeEndTime > System.currentTimeMillis()) {
-                timer = new Timer();
-                timer.scheduleAtFixedRate(new TimerTask() {
-                    @Override
-                    public void run() {
-                        updateTimer();
-                    }
-                }, 0, 1000);
-            } else {
-                tvTimer.setText("⏰ 00:00:00");
-            }
-        } else {
+        // Menggunakan data dari weekly challenges
+        if (userId != null) {
+            firebaseHelper.getInstance().getClass();
+            // Untuk sementara set timer default, Anda bisa sesuaikan dengan Firebase collection
             tvTimer.setText("⏰ Tidak ada tantangan aktif");
         }
     }
@@ -214,45 +209,63 @@ public class BelajarActivity extends AppCompatActivity {
     }
 
     private void loadLearnedLanguages() {
-        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        int userId = prefs.getInt("user_id", -1);
-        if (userId == -1) return;
+        if (userId == null) return;
 
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        String query = "SELECT l." + DatabaseHelper.COLUMN_LANGUAGE_NAME +
-                ", ugp." + DatabaseHelper.COLUMN_CURRENT_LEVEL + ", ugp." + DatabaseHelper.COLUMN_TOTAL_XP +
-                " FROM " + DatabaseHelper.TABLE_LANGUAGES + " l" +
-                " JOIN " + DatabaseHelper.TABLE_USER_LANGUAGES + " ul ON l." + DatabaseHelper.COLUMN_LANGUAGE_ID + " = ul." + DatabaseHelper.COLUMN_LANGUAGE_ID +
-                " LEFT JOIN " + DatabaseHelper.TABLE_USER_GAME_PROGRESS + " ugp ON ul." + DatabaseHelper.COLUMN_USER_ID + " = ugp." + DatabaseHelper.COLUMN_USER_ID +
-                " AND ul." + DatabaseHelper.COLUMN_LANGUAGE_ID + " = ugp." + DatabaseHelper.COLUMN_LANGUAGE_ID +
-                " WHERE ul." + DatabaseHelper.COLUMN_USER_ID + " = ?";
-        Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(userId)});
+        String[] languages = {"Bahasa Inggris", "Bahasa Jepang", "Bahasa Korea", "Bahasa Mandarin"};
 
-        while (cursor.moveToNext()) {
-            String languageName = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_LANGUAGE_NAME));
-            int level = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_CURRENT_LEVEL));
-            int totalXp = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_TOTAL_XP));
+        for (String languageName : languages) {
+            firebaseHelper.getLanguageId(languageName, languageId -> {
+                if (languageId != null) {
+                    firebaseHelper.getUserGameProgress(userId, languageId, new FirebaseHelper.UserDataCallback() {
+                        @Override
+                        public void onSuccess(Map<String, Object> userData) {
+                            Long levelLong = (Long) userData.get("current_level");
+                            Long totalXpLong = (Long) userData.get("total_xp");
 
-            int maxLevel = 10;
-            int progress = (level * 100) / maxLevel;
+                            int level = levelLong != null ? levelLong.intValue() : 0;
+                            int totalXp = totalXpLong != null ? totalXpLong.intValue() : 0;
 
-            updateLanguageUI(languageName, level, progress, totalXp);
+                            int maxLevel = 10;
+                            int progress = (level * 100) / maxLevel;
+
+                            runOnUiThread(() -> updateLanguageUI(languageName, level, progress, totalXp));
+                        }
+
+                        @Override
+                        public void onFailure(String error) {
+                            // Language not started yet
+                            runOnUiThread(() -> updateLanguageUI(languageName, 0, 0, 0));
+                        }
+                    });
+                }
+            });
         }
-        cursor.close();
     }
 
-    private int getTotalQuestionsForLanguage(String languageName) {
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        int languageId = dbHelper.getLanguageId(languageName);
-        String query = "SELECT COUNT(*) FROM " + DatabaseHelper.TABLE_GAME_QUESTIONS +
-                " WHERE " + DatabaseHelper.COLUMN_LANGUAGE_ID + " = ?";
-        Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(languageId)});
-        int totalQuestions = 0;
-        if (cursor.moveToFirst()) {
-            totalQuestions = cursor.getInt(0);
-        }
-        cursor.close();
-        return totalQuestions > 0 ? totalQuestions : 10; // Default 10 jika tidak ada data
+    private void getTotalQuestionsForLanguage(String languageName, TotalQuestionsCallback callback) {
+        firebaseHelper.getLanguageId(languageName, languageId -> {
+            if (languageId == null) {
+                callback.onResult(10);
+                return;
+            }
+
+            // Get all questions for this language across all levels
+            firebaseHelper.getGameQuestions(languageId, 1, new FirebaseHelper.QuestionsCallback() {
+                @Override
+                public void onSuccess(List<Map<String, Object>> questions) {
+                    callback.onResult(questions.size() > 0 ? questions.size() * 10 : 10); // Assuming 10 levels
+                }
+
+                @Override
+                public void onFailure(String error) {
+                    callback.onResult(10);
+                }
+            });
+        });
+    }
+
+    interface TotalQuestionsCallback {
+        void onResult(int total);
     }
 
     private void updateLanguageUI(String languageName, int level, int progress, int totalXp) {
@@ -295,132 +308,152 @@ public class BelajarActivity extends AppCompatActivity {
         TextView tvProgress = findViewById(progressTextId);
         LinearLayout layout = findViewById(layoutId);
 
-        // Hitung total soal untuk bahasa tertentu
-        int totalQuestions = getTotalQuestionsForLanguage(languageName);
-        int completedQuestions = totalXp / 10; // Asumsi setiap soal memberikan 10 XP
-        int progressPercentage = (totalQuestions > 0) ? (completedQuestions * 100) / totalQuestions : 0;
+        getTotalQuestionsForLanguage(languageName, totalQuestions -> {
+            int completedQuestions = totalXp / 10;
+            int progressPercentage = (totalQuestions > 0) ? (completedQuestions * 100) / totalQuestions : 0;
 
-        // Batasi progress agar tidak melebihi 100%
-        if (progressPercentage > 100) progressPercentage = 100;
+            if (progressPercentage > 100) progressPercentage = 100;
 
-        if (level == 0) {
-            tvLevel.setText("Belum Mulai");
-            progressBar.setProgress(0);
-            tvProgress.setText("0 XP");
-        } else {
-            tvLevel.setText("Level " + level);
-            progressBar.setProgress(progressPercentage);
-            tvProgress.setText(totalXp + " XP");
-        }
+            int finalProgress = progressPercentage;
+            runOnUiThread(() -> {
+                if (level == 0) {
+                    tvLevel.setText("Belum Mulai");
+                    progressBar.setProgress(0);
+                    tvProgress.setText("0 XP");
+                } else {
+                    tvLevel.setText("Level " + level);
+                    progressBar.setProgress(finalProgress);
+                    tvProgress.setText(totalXp + " XP");
+                }
+            });
+        });
     }
+
     private void showContinueLearningDialog() {
-        List<String> learnedLanguages = getLearnedLanguages();
-        if (learnedLanguages.isEmpty()) {
+        getLearnedLanguages(learnedLanguages -> {
+            if (learnedLanguages.isEmpty()) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Lanjutkan Belajar")
+                        .setMessage("Anda belum mempelajari bahasa apa pun. Mulai latihan baru terlebih dahulu!")
+                        .setPositiveButton("OK", (dialog, which) -> dialog.dismiss())
+                        .show();
+                return;
+            }
+
+            String[] languagesArray = learnedLanguages.toArray(new String[0]);
             new AlertDialog.Builder(this)
                     .setTitle("Lanjutkan Belajar")
-                    .setMessage("Anda belum mempelajari bahasa apa pun. Mulai latihan baru terlebih dahulu!")
-                    .setPositiveButton("OK", (dialog, which) -> dialog.dismiss())
+                    .setItems(languagesArray, (dialog, which) -> {
+                        String selectedLanguage = languagesArray[which];
+                        startGameActivity(selectedLanguage);
+                    })
+                    .setNegativeButton("Batal", (dialog, which) -> dialog.dismiss())
                     .show();
-            return;
-        }
-
-        String[] languagesArray = learnedLanguages.toArray(new String[0]);
-        new AlertDialog.Builder(this)
-                .setTitle("Lanjutkan Belajar")
-                .setItems(languagesArray, (dialog, which) -> {
-                    String selectedLanguage = languagesArray[which];
-                    startGameActivity(selectedLanguage);
-                })
-                .setNegativeButton("Batal", (dialog, which) -> dialog.dismiss())
-                .show();
+        });
     }
 
     private void showNewPracticeDialog() {
-        List<String> unlearnedLanguages = getUnlearnedLanguages();
-        if (unlearnedLanguages.isEmpty()) {
+        getUnlearnedLanguages(unlearnedLanguages -> {
+            if (unlearnedLanguages.isEmpty()) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Latihan Baru")
+                        .setMessage("Anda sudah mempelajari semua bahasa yang tersedia!")
+                        .setPositiveButton("OK", (dialog, which) -> dialog.dismiss())
+                        .show();
+                return;
+            }
+
+            String[] languagesArray = unlearnedLanguages.toArray(new String[0]);
             new AlertDialog.Builder(this)
                     .setTitle("Latihan Baru")
-                    .setMessage("Anda sudah mempelajari semua bahasa yang tersedia!")
-                    .setPositiveButton("OK", (dialog, which) -> dialog.dismiss())
+                    .setItems(languagesArray, (dialog, which) -> {
+                        String selectedLanguage = languagesArray[which];
+                        addLanguageToUser(selectedLanguage);
+                        startGameActivity(selectedLanguage);
+                    })
+                    .setNegativeButton("Batal", (dialog, which) -> dialog.dismiss())
                     .show();
+        });
+    }
+
+    private void getLearnedLanguages(LanguageListCallback callback) {
+        List<String> learnedLanguages = new ArrayList<>();
+        if (userId == null) {
+            callback.onResult(learnedLanguages);
             return;
         }
 
-        String[] languagesArray = unlearnedLanguages.toArray(new String[0]);
-        new AlertDialog.Builder(this)
-                .setTitle("Latihan Baru")
-                .setItems(languagesArray, (dialog, which) -> {
-                    String selectedLanguage = languagesArray[which];
-                    addLanguageToUser(selectedLanguage);
-                    startGameActivity(selectedLanguage);
-                })
-                .setNegativeButton("Batal", (dialog, which) -> dialog.dismiss())
-                .show();
+        String[] allLanguages = {"Bahasa Inggris", "Bahasa Jepang", "Bahasa Korea", "Bahasa Mandarin"};
+        final int[] checkCount = {0};
+
+        for (String languageName : allLanguages) {
+            firebaseHelper.getLanguageId(languageName, languageId -> {
+                if (languageId != null) {
+                    firebaseHelper.getUserGameProgress(userId, languageId, new FirebaseHelper.UserDataCallback() {
+                        @Override
+                        public void onSuccess(Map<String, Object> userData) {
+                            learnedLanguages.add(languageName);
+                            checkCount[0]++;
+                            if (checkCount[0] == allLanguages.length) {
+                                callback.onResult(learnedLanguages);
+                            }
+                        }
+
+                        @Override
+                        public void onFailure(String error) {
+                            checkCount[0]++;
+                            if (checkCount[0] == allLanguages.length) {
+                                callback.onResult(learnedLanguages);
+                            }
+                        }
+                    });
+                } else {
+                    checkCount[0]++;
+                    if (checkCount[0] == allLanguages.length) {
+                        callback.onResult(learnedLanguages);
+                    }
+                }
+            });
+        }
     }
 
-    private List<String> getLearnedLanguages() {
-        List<String> learnedLanguages = new ArrayList<>();
-        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        int userId = prefs.getInt("user_id", -1);
-        if (userId == -1) return learnedLanguages;
+    private void getUnlearnedLanguages(LanguageListCallback callback) {
+        getLearnedLanguages(learnedLanguages -> {
+            List<String> allLanguages = List.of("Bahasa Inggris", "Bahasa Jepang", "Bahasa Korea", "Bahasa Mandarin");
+            List<String> unlearnedLanguages = new ArrayList<>();
 
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        String query = "SELECT l." + DatabaseHelper.COLUMN_LANGUAGE_NAME +
-                " FROM " + DatabaseHelper.TABLE_LANGUAGES + " l" +
-                " JOIN " + DatabaseHelper.TABLE_USER_LANGUAGES + " ul ON l." + DatabaseHelper.COLUMN_LANGUAGE_ID + " = ul." + DatabaseHelper.COLUMN_LANGUAGE_ID +
-                " WHERE ul." + DatabaseHelper.COLUMN_USER_ID + " = ?";
-        Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(userId)});
-
-        while (cursor.moveToNext()) {
-            String languageName = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_LANGUAGE_NAME));
-            learnedLanguages.add(languageName);
-        }
-        cursor.close();
-        return learnedLanguages;
-    }
-
-    private List<String> getUnlearnedLanguages() {
-        List<String> allLanguages = new ArrayList<>();
-        List<String> learnedLanguages = getLearnedLanguages();
-        List<String> unlearnedLanguages = new ArrayList<>();
-
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        Cursor cursor = db.rawQuery("SELECT " + DatabaseHelper.COLUMN_LANGUAGE_NAME + " FROM " + DatabaseHelper.TABLE_LANGUAGES, null);
-        while (cursor.moveToNext()) {
-            String languageName = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_LANGUAGE_NAME));
-            allLanguages.add(languageName);
-        }
-        cursor.close();
-
-        for (String language : allLanguages) {
-            if (!learnedLanguages.contains(language)) {
-                unlearnedLanguages.add(language);
+            for (String language : allLanguages) {
+                if (!learnedLanguages.contains(language)) {
+                    unlearnedLanguages.add(language);
+                }
             }
-        }
-        return unlearnedLanguages;
+            callback.onResult(unlearnedLanguages);
+        });
+    }
+
+    interface LanguageListCallback {
+        void onResult(List<String> languages);
     }
 
     private void addLanguageToUser(String languageName) {
-        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        int userId = prefs.getInt("user_id", -1);
-        if (userId == -1) return;
+        if (userId == null) return;
 
-        SQLiteDatabase db = dbHelper.getWritableDatabase();
-        int languageId = dbHelper.getLanguageId(languageName);
-        if (languageId != -1) {
-            ContentValues values = new ContentValues();
-            values.put(DatabaseHelper.COLUMN_USER_ID, userId);
-            values.put(DatabaseHelper.COLUMN_LANGUAGE_ID, languageId);
-            values.put(DatabaseHelper.COLUMN_PROGRESS, 0);
-            db.insert(DatabaseHelper.TABLE_USER_LANGUAGES, null, values);
+        firebaseHelper.getLanguageId(languageName, languageId -> {
+            if (languageId != null) {
+                // Initialize game progress for this language
+                firebaseHelper.updateUserGameProgress(userId, languageId, 1, 0, new FirebaseHelper.XpCallback() {
+                    @Override
+                    public void onSuccess() {
+                        runOnUiThread(() -> loadLearnedLanguages());
+                    }
 
-            ContentValues progressValues = new ContentValues();
-            progressValues.put(DatabaseHelper.COLUMN_USER_ID, userId);
-            progressValues.put(DatabaseHelper.COLUMN_LANGUAGE_ID, languageId);
-            progressValues.put(DatabaseHelper.COLUMN_CURRENT_LEVEL, 1);
-            progressValues.put(DatabaseHelper.COLUMN_TOTAL_XP, 0);
-            db.insert(DatabaseHelper.TABLE_USER_GAME_PROGRESS, null, progressValues);
-        }
+                    @Override
+                    public void onFailure(String error) {
+                        // Handle error
+                    }
+                });
+            }
+        });
     }
 
     private void startGameActivity(String language) {
@@ -439,24 +472,7 @@ public class BelajarActivity extends AppCompatActivity {
     }
 
     private boolean isUserLoggedIn() {
-        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
-        return prefs.getInt("user_id", -1) != -1;
-    }
-
-    private Challenge getChallengeDataFromDatabase() {
-        SQLiteDatabase db = dbHelper.getReadableDatabase();
-        String query = "SELECT " + DatabaseHelper.COLUMN_END_TIME +
-                " FROM " + DatabaseHelper.TABLE_DAILY_CHALLENGES +
-                " WHERE " + DatabaseHelper.COLUMN_END_TIME + " > strftime('%s', 'now') LIMIT 1";
-        Cursor cursor = db.rawQuery(query, null);
-
-        Challenge challenge = null;
-        if (cursor.moveToFirst()) {
-            long endTime = cursor.getLong(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_END_TIME)) * 1000;
-            challenge = new Challenge(endTime);
-        }
-        cursor.close();
-        return challenge;
+        return firebaseHelper.isUserLoggedIn();
     }
 
     @Override
@@ -466,28 +482,6 @@ public class BelajarActivity extends AppCompatActivity {
             timer.cancel();
             timer = null;
         }
-        if (dbHelper != null) {
-            dbHelper.close();
-        }
-    }
-
-    private static class User {
-        private String avatarUrl;
-        private int level;
-        private int points;
-        private int streak;
-
-        public User(String avatarUrl, int level, int points, int streak) {
-            this.avatarUrl = avatarUrl;
-            this.level = level;
-            this.points = points;
-            this.streak = streak;
-        }
-
-        public String getAvatarUrl() { return avatarUrl; }
-        public int getLevel() { return level; }
-        public int getPoints() { return points; }
-        public int getStreak() { return streak; }
     }
 
     private static class Challenge {

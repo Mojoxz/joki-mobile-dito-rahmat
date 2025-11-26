@@ -15,7 +15,7 @@ public class RegisterActivity extends AppCompatActivity {
     Button btnRegister;
     TextView tvToLogin;
     MaterialButton btnGoogleRegister, btnFacebookRegister;
-    DatabaseHelper db;
+    FirebaseHelper firebaseHelper;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,25 +30,40 @@ public class RegisterActivity extends AppCompatActivity {
         btnGoogleRegister = findViewById(R.id.googleRegisterButton);
         btnFacebookRegister = findViewById(R.id.facebookRegisterButton);
 
-        db = new DatabaseHelper(RegisterActivity.this);
+        firebaseHelper = FirebaseHelper.getInstance();
 
         btnRegister.setOnClickListener(v -> {
-            String name = etName.getText().toString();
-            String email = etEmail.getText().toString();
-            String pass = etPassword.getText().toString();
+            String name = etName.getText().toString().trim();
+            String email = etEmail.getText().toString().trim();
+            String pass = etPassword.getText().toString().trim();
+
             if (name.isEmpty() || email.isEmpty() || pass.isEmpty()) {
                 Toast.makeText(this, "Isi semua field", Toast.LENGTH_SHORT).show();
             } else {
-                // Gunakan metode saveUser dari DatabaseHelper
-                // Parameter avatarUrl diberi nilai null karena belum ada input avatar
-                long userId = db.saveUser(name, email, pass, null);
-                if (userId != -1) {
-                    Toast.makeText(this, "Registrasi berhasil", Toast.LENGTH_SHORT).show();
-                    startActivity(new Intent(this, LoginActivity.class));
-                    finish(); // Tutup RegisterActivity setelah registrasi berhasil
-                } else {
-                    Toast.makeText(this, "Gagal mendaftar, email mungkin sudah digunakan", Toast.LENGTH_SHORT).show();
-                }
+                // Disable button saat proses registrasi
+                btnRegister.setEnabled(false);
+
+                // Gunakan FirebaseHelper untuk registrasi
+                // avatarUrl diberi nilai null karena belum ada input avatar
+                firebaseHelper.registerUser(email, pass, name, null, new FirebaseHelper.AuthCallback() {
+                    @Override
+                    public void onSuccess(String userId) {
+                        btnRegister.setEnabled(true);
+                        Toast.makeText(RegisterActivity.this, "Registrasi berhasil", Toast.LENGTH_SHORT).show();
+                        startActivity(new Intent(RegisterActivity.this, LoginActivity.class));
+                        finish(); // Tutup RegisterActivity setelah registrasi berhasil
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        btnRegister.setEnabled(true);
+                        if (error.contains("already in use") || error.contains("email-already-in-use")) {
+                            Toast.makeText(RegisterActivity.this, "Gagal mendaftar, email mungkin sudah digunakan", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(RegisterActivity.this, "Gagal mendaftar: " + error, Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
             }
         });
 
