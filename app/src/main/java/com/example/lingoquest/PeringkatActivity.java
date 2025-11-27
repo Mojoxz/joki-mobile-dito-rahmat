@@ -3,7 +3,6 @@ package com.example.lingoquest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -12,60 +11,68 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.constraintlayout.widget.ConstraintSet;
 import androidx.core.view.WindowCompat;
 
+import com.bumptech.glide.Glide;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.tabs.TabLayout;
-import com.google.firebase.database.DataSnapshot;
-import com.google.firebase.database.DatabaseError;
-import com.google.firebase.database.DatabaseReference;
-import com.google.firebase.database.FirebaseDatabase;
-import com.google.firebase.database.ValueEventListener;
 
-import java.io.File;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 
 public class PeringkatActivity extends AppCompatActivity {
 
-    private DatabaseReference mDatabase;
+    private static final String TAG = "PeringkatActivity";
+    private FirebaseHelper firebaseHelper;
     private String userId;
     private TabLayout tabLayout;
     private LinearLayout userItems4To10;
-    private TextView userRankText, userXpText;
+    private TextView userRankText, userXpText, userName1, userName2, userName3;
+    private TextView userXp1, userXp2, userXp3;
+    private ImageView userProfile1, userProfile2, userProfile3;
     private ProgressBar userProgressBar;
     private ImageView userProfileImage;
     private BottomNavigationView bottomNavigationView;
-    private String currentFilter = "Harian"; // Default filter
+    private String currentFilter = "Harian";
+    private RankNotificationHelper notificationHelper;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
         setContentView(R.layout.activity_peringkat);
 
-        // Inisialisasi Firebase dan userId
-        mDatabase = FirebaseDatabase.getInstance().getReference();
+        firebaseHelper = FirebaseHelper.getInstance();
+        notificationHelper = new RankNotificationHelper(this);
+
         SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", Context.MODE_PRIVATE);
         userId = prefs.getString("user_id", null);
+
         if (userId == null) {
             startActivity(new Intent(this, LoginActivity.class));
             finish();
             return;
         }
 
-        // Inisialisasi UI components
+        // Schedule rank notifications
+        notificationHelper.scheduleRankNotification();
+
+        initializeViews();
+        setupBottomNavigation();
+        setupTabLayout();
+        loadCurrentUserProfileImage();
+        loadLeaderboard();
+    }
+
+    private void initializeViews() {
         tabLayout = findViewById(R.id.tab_layout);
         userItems4To10 = findViewById(R.id.user_items_4_10);
         userRankText = findViewById(R.id.user_rank_text);
@@ -74,35 +81,46 @@ public class PeringkatActivity extends AppCompatActivity {
         userProfileImage = findViewById(R.id.user_profile_image);
         bottomNavigationView = findViewById(R.id.bottom_navigation);
 
-        // Muat foto profil pengguna saat ini
-        loadCurrentUserProfileImage();
+        // Top 3 users
+        userName1 = findViewById(R.id.name1);
+        userName2 = findViewById(R.id.name2);
+        userName3 = findViewById(R.id.name3);
+        userXp1 = findViewById(R.id.level_xp1);
+        userXp2 = findViewById(R.id.level_xp2);
+        userXp3 = findViewById(R.id.level_xp3);
+        userProfile1 = findViewById(R.id.profile_image1);
+        userProfile2 = findViewById(R.id.profile_image2);
+        userProfile3 = findViewById(R.id.profile_image3);
+    }
 
-        // Atur BottomNavigationView
+    private void setupBottomNavigation() {
         bottomNavigationView.setSelectedItemId(R.id.nav_peringkat);
         bottomNavigationView.setOnNavigationItemSelectedListener(item -> {
             NavigationItem navItem = NavigationItem.fromItemId(item.getItemId());
             if (navItem == null) return false;
+
             switch (navItem) {
                 case NAV_HOME:
-                    startActivity(new Intent(PeringkatActivity.this, MainActivity.class));
+                    startActivity(new Intent(this, MainActivity.class));
                     return true;
                 case NAV_BELAJAR:
-                    startActivity(new Intent(PeringkatActivity.this, BelajarActivity.class));
+                    startActivity(new Intent(this, BelajarActivity.class));
                     return true;
                 case NAV_TANTANGAN:
-                    startActivity(new Intent(PeringkatActivity.this, TantanganActivity.class));
+                    startActivity(new Intent(this, TantanganActivity.class));
                     return true;
                 case NAV_PERINGKAT:
                     return true;
                 case NAV_PROFIL:
-                    startActivity(new Intent(PeringkatActivity.this, ProfilActivity.class));
+                    startActivity(new Intent(this, ProfilActivity.class));
                     return true;
                 default:
                     return false;
             }
         });
+    }
 
-        // Atur TabLayout untuk filter Harian, Mingguan, Bulanan
+    private void setupTabLayout() {
         tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override
             public void onTabSelected(TabLayout.Tab tab) {
@@ -116,342 +134,319 @@ public class PeringkatActivity extends AppCompatActivity {
             @Override
             public void onTabReselected(TabLayout.Tab tab) {}
         });
-
-        // Muat leaderboard awal
-        loadLeaderboard();
     }
 
     private void loadLeaderboard() {
-        // Kosongkan daftar pengguna 4-10 sebelum memuat ulang
         userItems4To10.removeAllViews();
 
-        // Ambil data leaderboard
-        getLeaderboardData(users -> {
-            if (users == null || users.isEmpty()) {
-                // Jika tidak ada data, set peringkat pengguna saat ini sebagai #1
-                getCurrentUserData(currentUser -> {
-                    if (currentUser != null) {
-                        users.clear();
-                        users.add(currentUser);
-                        displayLeaderboard(users);
-                    }
-                });
-            } else {
-                displayLeaderboard(users);
-            }
-        });
-    }
+        // Tampilkan loading
+        Toast.makeText(this, "Memuat peringkat...", Toast.LENGTH_SHORT).show();
 
-    private void displayLeaderboard(List<UserData> users) {
-        // Tampilkan Top 3 pengguna
-        if (users.size() > 0) updateTopUser(findViewById(R.id.user_item_1), users.get(0), 1);
-        if (users.size() > 1) updateTopUser(findViewById(R.id.user_item_2), users.get(1), 2);
-        if (users.size() > 2) updateTopUser(findViewById(R.id.user_item_3), users.get(2), 3);
+        int limit = currentFilter.equals("Harian") ? 50 : 100;
 
-        // Tampilkan pengguna peringkat 4-10 secara dinamis
-        for (int i = 3; i < Math.min(10, users.size()); i++) {
-            addUserItem(users.get(i), i + 1);
-        }
-
-        // Perbarui peringkat pengguna saat ini
-        updateUserRank(users);
-    }
-
-    private void getLeaderboardData(LeaderboardCallback callback) {
-        List<UserData> users = new ArrayList<>();
-        String startDate = getStartDateForFilter(currentFilter);
-        String endDate = getCurrentDate();
-
-        mDatabase.child("users").addListenerForSingleValueEvent(new ValueEventListener() {
+        firebaseHelper.getLeaderboard(currentFilter, limit, new FirebaseHelper.LeaderboardCallback() {
             @Override
-            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-                for (DataSnapshot userSnapshot : dataSnapshot.getChildren()) {
-                    String uid = userSnapshot.getKey();
-                    String username = userSnapshot.child("username").getValue(String.class);
-                    String avatarUrl = userSnapshot.child("avatar_url").getValue(String.class);
-
-                    // Hitung total XP berdasarkan periode
-                    calculateXpForPeriod(uid, startDate, endDate, xp -> {
-                        // Ambil level dari user_game_progress
-                        getLevel(uid, level -> {
-                            users.add(new UserData(uid, username, avatarUrl, xp, level));
-
-                            // Setelah semua data dikumpulkan
-                            if (users.size() == (int) dataSnapshot.getChildrenCount()) {
-                                // Urutkan berdasarkan XP (descending)
-                                Collections.sort(users, (u1, u2) -> u2.getXp() - u1.getXp());
-
-                                // Ambil 10 teratas
-                                List<UserData> top10 = users.subList(0, Math.min(10, users.size()));
-                                callback.onDataLoaded(top10);
-                            }
-                        });
+            public void onSuccess(List<Map<String, Object>> leaderboard) {
+                if (leaderboard == null || leaderboard.isEmpty()) {
+                    runOnUiThread(() -> {
+                        Toast.makeText(PeringkatActivity.this,
+                                "Belum ada data peringkat",
+                                Toast.LENGTH_SHORT).show();
+                        displayEmptyLeaderboard();
                     });
+                    return;
                 }
+
+                runOnUiThread(() -> displayLeaderboard(leaderboard));
             }
 
             @Override
-            public void onCancelled(@NonNull DatabaseError databaseError) {
-                Log.e("PeringkatActivity", "Error loading leaderboard: " + databaseError.getMessage());
-                callback.onDataLoaded(users);
+            public void onFailure(String error) {
+                runOnUiThread(() -> {
+                    Toast.makeText(PeringkatActivity.this,
+                            "Gagal memuat peringkat: " + error,
+                            Toast.LENGTH_SHORT).show();
+                    Log.e(TAG, "Leaderboard error: " + error);
+                    displayEmptyLeaderboard();
+                });
             }
         });
     }
 
-    private void calculateXpForPeriod(String uid, String startDate, String endDate, XpCallback callback) {
-        mDatabase.child("xp_history").child(uid)
-                .orderByChild("timestamp")
-                .addListenerForSingleValueEvent(new ValueEventListener() {
-                    @Override
-                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-                        int totalXp = 0;
-                        for (DataSnapshot xpSnapshot : dataSnapshot.getChildren()) {
-                            String timestamp = xpSnapshot.child("timestamp").getValue(String.class);
-                            if (timestamp != null && isWithinPeriod(timestamp, startDate, endDate)) {
-                                Integer xp = xpSnapshot.child("xp").getValue(Integer.class);
-                                if (xp != null) {
-                                    totalXp += xp;
-                                }
-                            }
-                        }
-                        callback.onXpCalculated(totalXp);
-                    }
+    private void displayEmptyLeaderboard() {
+        // Reset top 3
+        userName1.setText("-");
+        userName2.setText("-");
+        userName3.setText("-");
+        userXp1.setText("0 XP");
+        userXp2.setText("0 XP");
+        userXp3.setText("0 XP");
+        userProfile1.setImageResource(R.drawable.default_avatar);
+        userProfile2.setImageResource(R.drawable.default_avatar);
+        userProfile3.setImageResource(R.drawable.default_avatar);
 
-                    @Override
-                    public void onCancelled(@NonNull DatabaseError databaseError) {
-                        callback.onXpCalculated(0);
-                    }
-                });
+        // Reset user rank
+        userRankText.setText("Peringkat: -");
+        userXpText.setText("0 XP");
+        userProgressBar.setProgress(0);
     }
 
-    private void getLevel(String uid, LevelCallback callback) {
-        mDatabase.child("user_game_progress").child(uid)
-                .addListenerForSingleValueEvent(new ValueEventListener() {
-                    @Override
-                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-                        int maxLevel = 1;
-                        for (DataSnapshot langSnapshot : dataSnapshot.getChildren()) {
-                            Integer level = langSnapshot.child("current_level").getValue(Integer.class);
-                            if (level != null && level > maxLevel) {
-                                maxLevel = level;
-                            }
-                        }
-                        callback.onLevelLoaded(maxLevel);
-                    }
+    private void displayLeaderboard(List<Map<String, Object>> leaderboard) {
+        // Display top 3
+        if (leaderboard.size() > 0) updateTopUser(1, leaderboard.get(0));
+        if (leaderboard.size() > 1) updateTopUser(2, leaderboard.get(1));
+        if (leaderboard.size() > 2) updateTopUser(3, leaderboard.get(2));
 
-                    @Override
-                    public void onCancelled(@NonNull DatabaseError databaseError) {
-                        callback.onLevelLoaded(1);
-                    }
-                });
+        // Display ranks 4-10
+        for (int i = 3; i < Math.min(10, leaderboard.size()); i++) {
+            addUserItem(leaderboard.get(i), i + 1);
+        }
+
+        // Update current user rank
+        updateUserRank(leaderboard);
+
+        // Check for rank changes and show notification
+        checkRankChanges(leaderboard);
     }
 
-    private void getCurrentUserData(UserDataCallback callback) {
-        String startDate = getStartDateForFilter(currentFilter);
-        String endDate = getCurrentDate();
+    private void updateTopUser(int rank, Map<String, Object> userData) {
+        String username = (String) userData.get("username");
+        Long totalXp = (Long) userData.get("total_xp");
+        String avatarUrl = (String) userData.get("avatar_url");
 
-        mDatabase.child("users").child(userId).addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-                String username = dataSnapshot.child("username").getValue(String.class);
-                String avatarUrl = dataSnapshot.child("avatar_url").getValue(String.class);
+        TextView nameView = null;
+        TextView xpView = null;
+        ImageView profileView = null;
 
-                calculateXpForPeriod(userId, startDate, endDate, xp -> {
-                    getLevel(userId, level -> {
-                        callback.onUserDataLoaded(new UserData(userId, username, avatarUrl, xp, level));
-                    });
-                });
-            }
+        switch (rank) {
+            case 1:
+                nameView = userName1;
+                xpView = userXp1;
+                profileView = userProfile1;
+                break;
+            case 2:
+                nameView = userName2;
+                xpView = userXp2;
+                profileView = userProfile2;
+                break;
+            case 3:
+                nameView = userName3;
+                xpView = userXp3;
+                profileView = userProfile3;
+                break;
+        }
 
-            @Override
-            public void onCancelled(@NonNull DatabaseError databaseError) {
-                callback.onUserDataLoaded(null);
-            }
-        });
-    }
+        if (nameView != null && xpView != null && profileView != null) {
+            nameView.setText(username != null ? username : "User " + rank);
 
-    private String getStartDateForFilter(String filter) {
-        Calendar calendar = Calendar.getInstance();
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+            double xpInK = totalXp != null ? totalXp / 1000.0 : 0;
+            xpView.setText(String.format("%.1fK XP", xpInK));
 
-        switch (filter) {
-            case "Harian":
-                // Hari ini
-                return sdf.format(calendar.getTime());
-            case "Mingguan":
-                // Awal minggu (Senin)
-                calendar.set(Calendar.DAY_OF_WEEK, Calendar.MONDAY);
-                return sdf.format(calendar.getTime());
-            case "Bulanan":
-                // Awal bulan
-                calendar.set(Calendar.DAY_OF_MONTH, 1);
-                return sdf.format(calendar.getTime());
-            default:
-                return sdf.format(calendar.getTime());
+            loadProfileImage(profileView, avatarUrl);
         }
     }
 
-    private String getCurrentDate() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
-        return sdf.format(Calendar.getInstance().getTime());
-    }
-
-    private boolean isWithinPeriod(String timestamp, String startDate, String endDate) {
-        return timestamp.compareTo(startDate) >= 0 && timestamp.compareTo(endDate) <= 0;
-    }
-
-    private void updateTopUser(View view, UserData user, int rank) {
-        TextView name = view.findViewById(getResources().getIdentifier("name" + rank, "id", getPackageName()));
-        TextView xp = view.findViewById(getResources().getIdentifier("level_xp" + rank, "id", getPackageName()));
-        ImageView profile = view.findViewById(getResources().getIdentifier("profile_image" + rank, "id", getPackageName()));
-        TextView crown = view.findViewById(getResources().getIdentifier("crown" + rank, "id", getPackageName()));
-
-        name.setText(user.getUsername());
-        xp.setText(String.format("%.1fK XP", user.getXp() / 1000.0));
-        loadProfileImage(profile, user.getAvatarUrl());
-        crown.setVisibility(rank <= 3 ? View.VISIBLE : View.GONE);
-    }
-
-    private void addUserItem(UserData user, int rank) {
+    private void addUserItem(Map<String, Object> userData, int rank) {
         ConstraintLayout itemView = new ConstraintLayout(this);
         itemView.setLayoutParams(new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         ));
-        itemView.setPadding(0, 0, 0, dpToPx(16));
+        itemView.setPadding(dpToPx(16), dpToPx(8), dpToPx(16), dpToPx(8));
 
+        // Rank badge
         TextView rankText = new TextView(this);
         rankText.setId(View.generateViewId());
-        rankText.setLayoutParams(new ConstraintLayout.LayoutParams(dpToPx(40), dpToPx(40)));
+        ConstraintLayout.LayoutParams rankParams = new ConstraintLayout.LayoutParams(
+                dpToPx(40), dpToPx(40));
+        rankText.setLayoutParams(rankParams);
         rankText.setBackgroundResource(R.drawable.circle_purple);
         rankText.setText("#" + rank);
         rankText.setTextColor(getResources().getColor(android.R.color.white));
         rankText.setGravity(android.view.Gravity.CENTER);
+        rankText.setTextSize(14);
         itemView.addView(rankText);
 
+        // Profile image
         ImageView profileImage = new ImageView(this);
         profileImage.setId(View.generateViewId());
-        profileImage.setLayoutParams(new ConstraintLayout.LayoutParams(dpToPx(50), dpToPx(50)));
-        loadProfileImage(profileImage, user.getAvatarUrl());
+        ConstraintLayout.LayoutParams imageParams = new ConstraintLayout.LayoutParams(
+                dpToPx(50), dpToPx(50));
+        profileImage.setLayoutParams(imageParams);
+        profileImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        String avatarUrl = (String) userData.get("avatar_url");
+        loadProfileImage(profileImage, avatarUrl);
         itemView.addView(profileImage);
 
+        // Username
         TextView nameText = new TextView(this);
         nameText.setId(View.generateViewId());
-        nameText.setLayoutParams(new ConstraintLayout.LayoutParams(ConstraintLayout.LayoutParams.WRAP_CONTENT, ConstraintLayout.LayoutParams.WRAP_CONTENT));
-        nameText.setText(user.getUsername());
+        ConstraintLayout.LayoutParams nameParams = new ConstraintLayout.LayoutParams(
+                ConstraintLayout.LayoutParams.WRAP_CONTENT,
+                ConstraintLayout.LayoutParams.WRAP_CONTENT);
+        nameText.setLayoutParams(nameParams);
+        String username = (String) userData.get("username");
+        nameText.setText(username != null ? username : "User " + rank);
         nameText.setTextSize(16);
         nameText.setTextColor(getResources().getColor(android.R.color.black));
         itemView.addView(nameText);
 
+        // XP text
         TextView xpText = new TextView(this);
         xpText.setId(View.generateViewId());
-        xpText.setLayoutParams(new ConstraintLayout.LayoutParams(ConstraintLayout.LayoutParams.WRAP_CONTENT, ConstraintLayout.LayoutParams.WRAP_CONTENT));
-        xpText.setText(String.format("%.1fK XP", user.getXp() / 1000.0));
+        ConstraintLayout.LayoutParams xpParams = new ConstraintLayout.LayoutParams(
+                ConstraintLayout.LayoutParams.WRAP_CONTENT,
+                ConstraintLayout.LayoutParams.WRAP_CONTENT);
+        xpText.setLayoutParams(xpParams);
+        Long totalXp = (Long) userData.get("total_xp");
+        double xpInK = totalXp != null ? totalXp / 1000.0 : 0;
+        xpText.setText(String.format("%.1fK XP", xpInK));
         xpText.setTextSize(14);
-        xpText.setTextColor(getResources().getColor(android.R.color.black));
+        xpText.setTextColor(getResources().getColor(android.R.color.darker_gray));
         itemView.addView(xpText);
 
+        // Apply constraints
         ConstraintSet constraintSet = new ConstraintSet();
         constraintSet.clone(itemView);
-        constraintSet.connect(rankText.getId(), ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START);
-        constraintSet.connect(rankText.getId(), ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP);
-        constraintSet.connect(profileImage.getId(), ConstraintSet.START, rankText.getId(), ConstraintSet.END, dpToPx(8));
-        constraintSet.connect(profileImage.getId(), ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP);
-        constraintSet.connect(nameText.getId(), ConstraintSet.START, profileImage.getId(), ConstraintSet.END, dpToPx(8));
-        constraintSet.connect(nameText.getId(), ConstraintSet.TOP, profileImage.getId(), ConstraintSet.TOP);
-        constraintSet.connect(xpText.getId(), ConstraintSet.START, profileImage.getId(), ConstraintSet.END, dpToPx(8));
-        constraintSet.connect(xpText.getId(), ConstraintSet.TOP, nameText.getId(), ConstraintSet.BOTTOM);
-        constraintSet.applyTo(itemView);
 
-        rankText.setBackgroundResource(R.color.light_purple);
-        rankText.setTextColor(getResources().getColor(android.R.color.black));
+        // Rank badge constraints
+        constraintSet.connect(rankText.getId(), ConstraintSet.START,
+                ConstraintSet.PARENT_ID, ConstraintSet.START, 0);
+        constraintSet.connect(rankText.getId(), ConstraintSet.TOP,
+                ConstraintSet.PARENT_ID, ConstraintSet.TOP, dpToPx(8));
+        constraintSet.connect(rankText.getId(), ConstraintSet.BOTTOM,
+                ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM, dpToPx(8));
+
+        // Profile image constraints
+        constraintSet.connect(profileImage.getId(), ConstraintSet.START,
+                rankText.getId(), ConstraintSet.END, dpToPx(12));
+        constraintSet.connect(profileImage.getId(), ConstraintSet.TOP,
+                ConstraintSet.PARENT_ID, ConstraintSet.TOP, dpToPx(4));
+        constraintSet.connect(profileImage.getId(), ConstraintSet.BOTTOM,
+                ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM, dpToPx(4));
+
+        // Username constraints
+        constraintSet.connect(nameText.getId(), ConstraintSet.START,
+                profileImage.getId(), ConstraintSet.END, dpToPx(12));
+        constraintSet.connect(nameText.getId(), ConstraintSet.TOP,
+                profileImage.getId(), ConstraintSet.TOP, 0);
+
+        // XP text constraints
+        constraintSet.connect(xpText.getId(), ConstraintSet.START,
+                profileImage.getId(), ConstraintSet.END, dpToPx(12));
+        constraintSet.connect(xpText.getId(), ConstraintSet.TOP,
+                nameText.getId(), ConstraintSet.BOTTOM, dpToPx(2));
+
+        constraintSet.applyTo(itemView);
 
         userItems4To10.addView(itemView);
     }
 
-    private void updateUserRank(List<UserData> users) {
+    private void updateUserRank(List<Map<String, Object>> leaderboard) {
         int userRank = -1;
-        int userXp = 0;
+        long userXp = 0;
+        long topXp = 0;
 
-        for (int i = 0; i < users.size(); i++) {
-            if (users.get(i).getId().equals(userId)) {
+        if (leaderboard.size() > 0) {
+            Long firstXp = (Long) leaderboard.get(0).get("total_xp");
+            topXp = firstXp != null ? firstXp : 0;
+        }
+
+        for (int i = 0; i < leaderboard.size(); i++) {
+            String uid = (String) leaderboard.get(i).get("user_id");
+            if (uid != null && uid.equals(userId)) {
                 userRank = i + 1;
-                userXp = users.get(i).getXp();
+                Long xp = (Long) leaderboard.get(i).get("total_xp");
+                userXp = xp != null ? xp : 0;
                 break;
             }
         }
 
-        if (userRank == -1) {
-            getCurrentUserData(currentUser -> {
-                if (currentUser != null) {
-                    users.add(currentUser);
-                    Collections.sort(users, (u1, u2) -> u2.getXp() - u1.getXp());
-                    for (int i = 0; i < users.size(); i++) {
-                        if (users.get(i).getId().equals(userId)) {
-                            updateUserRankUI(i + 1, users.get(i).getXp(), users);
-                            break;
-                        }
-                    }
-                }
-            });
-        } else {
-            updateUserRankUI(userRank, userXp, users);
-        }
+        updateUserRankUI(userRank, userXp, topXp);
     }
 
-    private void updateUserRankUI(int userRank, int userXp, List<UserData> users) {
-        int topXp = (users.size() > 0) ? users.get(0).getXp() : 0;
-
+    private void updateUserRankUI(int userRank, long userXp, long topXp) {
         if (userRank != -1) {
             userRankText.setText("Peringkat Anda #" + userRank);
-            userXpText.setText(String.format("%.1fK XP", userXp / 1000.0));
+            double xpInK = userXp / 1000.0;
+            userXpText.setText(String.format("%.1fK XP", xpInK));
 
-            if (userRank == 1) {
+            if (userRank == 1 || topXp == 0) {
                 userProgressBar.setProgress(100);
-            } else if (topXp > 0 && userXp < topXp) {
-                float progress = (float) userXp / topXp * 100;
-                if (progress < 0) progress = 0;
-                if (progress > 100) progress = 100;
-                userProgressBar.setProgress((int) progress);
             } else {
-                userProgressBar.setProgress(0);
+                float progress = (float) userXp / topXp * 100;
+                progress = Math.max(0, Math.min(100, progress));
+                userProgressBar.setProgress((int) progress);
             }
         } else {
-            userRankText.setText("Peringkat Anda Tidak Ditemukan");
-            userXpText.setText("0.0K XP");
+            userRankText.setText("Belum masuk peringkat");
+            userXpText.setText("0 XP");
             userProgressBar.setProgress(0);
         }
     }
 
-    private void loadCurrentUserProfileImage() {
-        mDatabase.child("users").child(userId).child("avatar_url")
-                .addListenerForSingleValueEvent(new ValueEventListener() {
+    private void checkRankChanges(List<Map<String, Object>> leaderboard) {
+        int currentRank = -1;
+        for (int i = 0; i < leaderboard.size(); i++) {
+            String uid = (String) leaderboard.get(i).get("user_id");
+            if (uid != null && uid.equals(userId)) {
+                currentRank = i + 1;
+                break;
+            }
+        }
+
+        if (currentRank == -1) return;
+
+        SharedPreferences prefs = getSharedPreferences("LingoQuestPrefs", MODE_PRIVATE);
+        int previousRank = prefs.getInt("previous_rank_" + currentFilter, currentRank);
+        int daysStuck = prefs.getInt("days_stuck_" + currentFilter, 0);
+
+        if (currentRank == previousRank) {
+            daysStuck++;
+            if (daysStuck >= 2) {
+                firebaseHelper.getUserData(userId, new FirebaseHelper.UserDataCallback() {
                     @Override
-                    public void onDataChange(@NonNull DataSnapshot dataSnapshot) {
-                        String avatarUrl = dataSnapshot.getValue(String.class);
-                        loadProfileImage(userProfileImage, avatarUrl);
+                    public void onSuccess(Map<String, Object> userData) {
+                        // Notification akan ditangani oleh RankNotificationWorker
                     }
 
                     @Override
-                    public void onCancelled(@NonNull DatabaseError databaseError) {
-                        loadProfileImage(userProfileImage, null);
-                    }
+                    public void onFailure(String error) {}
                 });
+            }
+        } else {
+            daysStuck = 0;
+        }
+
+        prefs.edit()
+                .putInt("previous_rank_" + currentFilter, currentRank)
+                .putInt("days_stuck_" + currentFilter, daysStuck)
+                .apply();
+    }
+
+    private void loadCurrentUserProfileImage() {
+        firebaseHelper.getUserData(userId, new FirebaseHelper.UserDataCallback() {
+            @Override
+            public void onSuccess(Map<String, Object> userData) {
+                String avatarUrl = (String) userData.get("avatar_url");
+                runOnUiThread(() -> loadProfileImage(userProfileImage, avatarUrl));
+            }
+
+            @Override
+            public void onFailure(String error) {
+                runOnUiThread(() -> userProfileImage.setImageResource(R.drawable.default_avatar));
+            }
+        });
     }
 
     private void loadProfileImage(ImageView imageView, String avatarUrl) {
         if (avatarUrl != null && !avatarUrl.isEmpty()) {
-            try {
-                File file = new File(avatarUrl);
-                if (file.exists()) {
-                    imageView.setImageURI(Uri.fromFile(file));
-                } else {
-                    imageView.setImageResource(R.drawable.default_avatar);
-                }
-            } catch (Exception e) {
-                imageView.setImageResource(R.drawable.default_avatar);
-                Log.e("PeringkatActivity", "Error loading image: " + e.getMessage());
-            }
+            Glide.with(this)
+                    .load(avatarUrl)
+                    .placeholder(R.drawable.default_avatar)
+                    .error(R.drawable.default_avatar)
+                    .circleCrop()
+                    .into(imageView);
         } else {
             imageView.setImageResource(R.drawable.default_avatar);
         }
@@ -460,44 +455,5 @@ public class PeringkatActivity extends AppCompatActivity {
     private int dpToPx(int dp) {
         float density = getResources().getDisplayMetrics().density;
         return Math.round(dp * density);
-    }
-
-    // Callback interfaces
-    interface LeaderboardCallback {
-        void onDataLoaded(List<UserData> users);
-    }
-
-    interface XpCallback {
-        void onXpCalculated(int xp);
-    }
-
-    interface LevelCallback {
-        void onLevelLoaded(int level);
-    }
-
-    interface UserDataCallback {
-        void onUserDataLoaded(UserData user);
-    }
-
-    private static class UserData {
-        private String id;
-        private String username;
-        private String avatarUrl;
-        private int xp;
-        private int level;
-
-        public UserData(String id, String username, String avatarUrl, int xp, int level) {
-            this.id = id;
-            this.username = username;
-            this.avatarUrl = avatarUrl;
-            this.xp = xp;
-            this.level = level;
-        }
-
-        public String getId() { return id; }
-        public String getUsername() { return username; }
-        public String getAvatarUrl() { return avatarUrl; }
-        public int getXp() { return xp; }
-        public int getLevel() { return level; }
     }
 }

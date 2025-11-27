@@ -13,4 +13,14 @@
     <color name="accent_blue">#60A5FA</color>
     <color name="accent_green">#00FF00</color>
     <color name="accent_red">#FF4444</color>
+    <color name="purple_primary">#9C27B0</color>
+    <color name="purple_dark">#7B1FA2</color>
+    <color name="rank_gold">#FFD700</color>
+    <color name="rank_silver">#C0C0C0</color>
+    <color name="rank_bronze">#CD7F32</color>
+
+    <!-- Warna text -->
+    <color name="text_primary">#212121</color>
+    <color name="text_secondary">#757575</color>
+    <color name="darker_gray">#616161</color>
 </resources>

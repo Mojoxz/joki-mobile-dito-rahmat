@@ -63,4 +63,10 @@ dependencies {
     // Optional: Firebase Analytics (jika enabled di console)
     implementation("com.google.firebase:firebase-analytics")
 
+    // Tambahkan ini untuk notifikasi dan background tasks
+    implementation ("androidx.work:work-runtime:2.8.1")
+
+    // Glide untuk loading image (jika belum ada)
+    implementation ("com.github.bumptech.glide:glide:4.15.1")
+    annotationProcessor ("com.github.bumptech.glide:compiler:4.15.1")
 }

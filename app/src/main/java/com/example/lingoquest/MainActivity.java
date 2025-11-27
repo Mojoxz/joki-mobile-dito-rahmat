@@ -31,6 +31,7 @@ public class MainActivity extends AppCompatActivity {
     private long challengeEndTime;
     private FirebaseHelper firebaseHelper;
     private String userId;
+    private RankNotificationHelper notificationHelper; // ← TAMBAHAN
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,6 +67,17 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "Initializing app data... Please wait", Toast.LENGTH_LONG).show();
         }
         // ====================================================================
+
+        // ==================== TAMBAHAN: INISIALISASI NOTIFIKASI PERINGKAT ====================
+        // Inisialisasi helper notifikasi
+        notificationHelper = new RankNotificationHelper(this);
+
+        // Jadwalkan notifikasi peringkat otomatis (2x sehari: jam 9 pagi & 6 sore)
+        notificationHelper.scheduleRankNotification();
+
+        // Log untuk debugging
+        android.util.Log.d("MainActivity", "Rank notification scheduler initialized");
+        // =====================================================================================
 
         ivAvatar = findViewById(R.id.avatar);
         tvLevel = findViewById(R.id.level_value);
@@ -113,6 +125,11 @@ public class MainActivity extends AppCompatActivity {
                     return false;
             }
         });
+
+        // ==================== TAMBAHAN: TEST NOTIFIKASI (OPSIONAL) ====================
+        // Uncomment untuk test notifikasi manual
+        // testNotification();
+        // ===============================================================================
     }
 
     // ==================== TAMBAHAN: METHOD INISIALISASI DATA ====================
@@ -131,6 +148,23 @@ public class MainActivity extends AppCompatActivity {
         // Anda bisa tambahkan ProgressDialog atau Toast di sini
     }
     // ===========================================================================
+
+    // ==================== TAMBAHAN: METHOD TEST NOTIFIKASI (OPSIONAL) ====================
+    /**
+     * Method untuk testing notifikasi secara manual
+     * Uncomment method testNotification() di onCreate untuk menggunakan
+     */
+    private void testNotification() {
+        // Test notifikasi stuck peringkat
+        notificationHelper.showMotivationalNotification(5, 3);
+
+        // Atau test notifikasi perubahan peringkat
+        // notificationHelper.showRankNotification(3, 5, "John");
+
+        Toast.makeText(this, "Test notifikasi dikirim!", Toast.LENGTH_SHORT).show();
+        android.util.Log.d("MainActivity", "Test notification sent");
+    }
+    // ======================================================================================
 
     private void loadUserData() {
         if (userId == null) return;
